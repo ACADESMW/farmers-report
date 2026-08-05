@@ -43,7 +43,7 @@ function buildDistrictOptions() {
 const $ = (id) => document.getElementById(id);
 
 let elForm, elBanner, elTableBody, elAddRow, elRowCountLabel, elSubmitBtn, elTableError;
-let elSessionBanner, elSessionId, elSessionNote, elEndSessionBtn, elResetBtn;
+let elResetBtn;
 
 /* ---------------------------------------------------------
    Small helpers
@@ -596,9 +596,6 @@ function applySession(session) {
   elTableBody.innerHTML = "";
   addFarmerRow();
 
-  elSessionId.textContent = session.submissionId || "unknown";
-  elSessionNote.textContent = "CBV details are locked. Submit again to add more farmers under this same report.";
-  elSessionBanner.hidden = false;
   elResetBtn.textContent = "Start New Report (Yambani Ripoti Latsopano)";
 }
 
@@ -613,9 +610,6 @@ function hardResetForm() {
 
   lockCbvFields(false);
 
-  elSessionBanner.hidden = true;
-  elSessionId.textContent = "";
-  elSessionNote.textContent = "";
   elResetBtn.textContent = "Reset Form (Bwezerani Fomu)";
 }
 
@@ -648,10 +642,6 @@ function init() {
   elRowCountLabel = $("rowCountLabel");
   elSubmitBtn = $("submitBtn");
   elTableError = $("farmerTable-error");
-  elSessionBanner = $("sessionBanner");
-  elSessionId = $("sessionId");
-  elSessionNote = $("sessionNote");
-  elEndSessionBtn = $("endSessionBtn");
   elResetBtn = $("resetBtn");
 
   /* Inject district options into the CBV section */
@@ -661,7 +651,6 @@ function init() {
   elAddRow.addEventListener("click", addFarmerRow);
   elForm.addEventListener("submit", handleSubmit);
   elForm.addEventListener("reset", handleFormReset);
-  elEndSessionBtn.addEventListener("click", startNewReport);
 
   /* Delegate delete-row clicks to the tbody (works for all rows) */
   elTableBody.addEventListener("click", (event) => {
