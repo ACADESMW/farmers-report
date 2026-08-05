@@ -22,6 +22,15 @@
     <!-- Success / error banner (hidden until needed) -->
     <div id="banner" class="banner" role="alert" hidden></div>
 
+    <!-- Active CBV session banner (shown while a session is saved) -->
+    <div id="sessionBanner" class="session-banner" role="status" hidden>
+      <div class="session-text">
+        <strong>Active session</strong> &mdash; Report ID: <span id="sessionId"></span>
+        <p id="sessionNote"></p>
+      </div>
+      <button type="button" id="endSessionBtn" class="btn btn-ghost">End Session</button>
+    </div>
+
     <!-- novalidate: all validation is handled in script.js so we can show custom messages -->
     <form id="farmerForm" novalidate>
 

@@ -122,6 +122,33 @@ main.container {
   border-color: #90caf9;
 }
 
+/* ---------- Active session banner ---------- */
+.session-banner {
+  background: var(--lime-tint);
+  border: 1px solid var(--lime);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.session-banner strong {
+  color: var(--primary-dark);
+}
+
+.session-banner p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.session-banner .btn {
+  flex-shrink: 0;
+}
+
 /* ---------- Cards (form sections) ---------- */
 .card {
   background: var(--card-bg);
@@ -696,6 +723,17 @@ textarea {
     box-shadow: var(--shadow);
     padding: 10px;
     margin-top: 4px;
+  }
+
+  /* Session banner stacks on phones */
+  .session-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .session-banner .btn {
+    width: 100%;
   }
 }
 

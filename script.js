@@ -43,6 +43,7 @@ function buildDistrictOptions() {
 const $ = (id) => document.getElementById(id);
 
 let elForm, elBanner, elTableBody, elAddRow, elRowCountLabel, elSubmitBtn, elTableError;
+let elSessionBanner, elSessionId, elSessionNote, elEndSessionBtn, elResetBtn;
 
 /* ---------------------------------------------------------
    Small helpers
@@ -417,7 +418,7 @@ function buildPayload() {
   const cbv = {
     name: elForm.elements.cbvName.value.trim(),
     age: Number(elForm.elements.cbvAge.value),
-    gender: (elForm.elements.cbvGender.value || ""),
+    gender: (Array.from(elForm.elements.cbvGender).find((r) => r.checked) || {}).value || "",
     district: elForm.elements.cbvDistrict.value,
     ta: elForm.elements.cbvTa.value.trim(),
     group: elForm.elements.cbvGroup.value.trim(),
@@ -443,7 +444,9 @@ function buildPayload() {
     }))
     .filter((f) => f.name || f.age !== null || f.gender || f.district || f.ta || f.groupName || f.satisfied || f.followUp || f.comments);
 
-  return { cbv, summary, farmers };
+  /* Reuse the saved Submission ID on follow-up submits */
+  const session = loadSession();
+  return { cbv, summary, farmers, submissionId: (session && session.submissionId) || "" };
 }
 
 /* ---------------------------------------------------------
@@ -494,8 +497,24 @@ async function handleSubmit(event) {
     const result = await submitToAppsScript(payload);
 
     if (result && result.success) {
-      showBanner("success", `Report submitted successfully! Reference ID: ${result.submissionId || "OK"}`);
-      resetForm();
+      const existing = loadSession();
+      if (existing && existing.submissionId) {
+        showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) to report ${existing.submissionId}. The CBV details stay locked for the next batch.`);
+      } else {
+        saveSession({
+          submissionId: result.submissionId || "OK",
+          submittedAt: new Date().toISOString(),
+          cbv: payload.cbv,
+          summary: payload.summary,
+        });
+        showBanner("success", `Report submitted successfully! Reference ID: ${result.submissionId || "OK"}`);
+      }
+      const saved = loadSession();
+      if (saved && saved.submissionId) {
+        applySession(saved);
+      } else {
+        hardResetForm();
+      }
     } else {
       throw new Error((result && result.error) || "The server rejected the submission.");
     }
@@ -511,17 +530,111 @@ async function handleSubmit(event) {
 }
 
 /* ---------------------------------------------------------
-   Reset the whole form to a blank state
+   Session persistence
    --------------------------------------------------------- */
-function resetForm() {
-  elForm.reset();
-  /* Rebuild the farmer table with a single clean row */
+const SESSION_KEY = "farmers_report_session";
+
+function saveSession(data) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  } catch (e) {
+    /* storage unavailable (private mode) - session just won't persist */
+  }
+}
+
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+/* Lock / unlock the CBV fields (locked during an active session) */
+function lockCbvFields(lock) {
+  [
+    elForm.elements.cbvName,
+    elForm.elements.cbvAge,
+    elForm.elements.cbvDistrict,
+    elForm.elements.cbvTa,
+    elForm.elements.cbvGroup,
+  ].forEach((el) => (el.disabled = lock));
+  Array.from(elForm.elements.cbvGender).forEach((r) => (r.disabled = lock));
+}
+
+/*
+ * Restore a saved session: CBV details are pre-filled and locked,
+ * the summary is kept, and the farmer table is cleared so the CBV
+ * can submit another batch of farmers under the same report.
+ */
+function applySession(session) {
+  const cbv = session.cbv || {};
+  elForm.elements.cbvName.value = cbv.name || "";
+  elForm.elements.cbvAge.value = cbv.age != null ? String(cbv.age) : "";
+  Array.from(elForm.elements.cbvGender).forEach((r) => {
+    r.checked = r.value === cbv.gender;
+  });
+  elForm.elements.cbvDistrict.value = cbv.district || "";
+  elForm.elements.cbvTa.value = cbv.ta || "";
+  elForm.elements.cbvGroup.value = cbv.group || "";
+  elForm.elements.reachedCount.value =
+    session.summary && session.summary.farmersReached != null
+      ? String(session.summary.farmersReached)
+      : "";
+
+  lockCbvFields(true);
+
   elTableBody.innerHTML = "";
   addFarmerRow();
-  /* Clear any leftover validation highlighting */
+
+  elSessionId.textContent = session.submissionId || "unknown";
+  elSessionNote.textContent = "CBV details are locked. Submit again to add more farmers under this same report.";
+  elSessionBanner.hidden = false;
+  elResetBtn.textContent = "Start New Report";
+}
+
+/* Hard-reset the form to a fully blank, unlocked state (no session) */
+function hardResetForm() {
+  elForm.reset();
+  elTableBody.innerHTML = "";
+  addFarmerRow();
   elForm.querySelectorAll(".invalid").forEach((el) => el.classList.remove("invalid"));
   elForm.querySelectorAll(".field-error").forEach((el) => (el.textContent = ""));
   elTableError.textContent = "";
+
+  lockCbvFields(false);
+
+  elSessionBanner.hidden = true;
+  elSessionId.textContent = "";
+  elSessionNote.textContent = "";
+  elResetBtn.textContent = "Reset Form";
+}
+
+/* The Reset button asks first when a session is active */
+function handleFormReset(event) {
+  event.preventDefault();
+  if (loadSession()) {
+    if (window.confirm("Start a new report? This ends the current session and clears its saved CBV details.")) {
+      startNewReport();
+    }
+    return;
+  }
+  hardResetForm();
+}
+
+/* End the active session and clear the form for a brand-new report */
+function startNewReport() {
+  clearSession();
+  hardResetForm();
 }
 
 /* ---------------------------------------------------------
@@ -535,6 +648,11 @@ function init() {
   elRowCountLabel = $("rowCountLabel");
   elSubmitBtn = $("submitBtn");
   elTableError = $("farmerTable-error");
+  elSessionBanner = $("sessionBanner");
+  elSessionId = $("sessionId");
+  elSessionNote = $("sessionNote");
+  elEndSessionBtn = $("endSessionBtn");
+  elResetBtn = $("resetBtn");
 
   /* Inject district options into the CBV section */
   $("cbvDistrict").insertAdjacentHTML("beforeend", buildDistrictOptions());
@@ -542,7 +660,8 @@ function init() {
   /* Event listeners */
   elAddRow.addEventListener("click", addFarmerRow);
   elForm.addEventListener("submit", handleSubmit);
-  elForm.addEventListener("reset", resetForm);
+  elForm.addEventListener("reset", handleFormReset);
+  elEndSessionBtn.addEventListener("click", startNewReport);
 
   /* Delegate delete-row clicks to the tbody (works for all rows) */
   elTableBody.addEventListener("click", (event) => {
@@ -552,6 +671,12 @@ function init() {
 
   /* Start with one empty farmer row */
   addFarmerRow();
+
+  /* Restore an active session (CBV locked, ready for more farmers) */
+  const saved = loadSession();
+  if (saved && saved.submissionId) {
+    applySession(saved);
+  }
 }
 
 /* Run when the DOM is fully loaded */
