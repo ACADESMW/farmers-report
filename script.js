@@ -128,15 +128,15 @@ function createFarmerRow(index) {
   /* Gender */
   tr.appendChild(cell(
     "",
-    `<select class="f-gender"><option value="">-Select-</option>` +
+    `<select class="f-gender"><option value="">-Select- (Sankhani)</option>` +
     `<option value="Mamuna">Mamuna</option><option value="Mkazi">Mkazi</option></select>`,
-    "Gender"
+    "Gender (Mamuna/Mkazi)"
   ));
 
   /* District */
   tr.appendChild(cell(
     "",
-    `<select class="f-district"><option value="">-Select-</option>${buildDistrictOptions()}</select>`,
+    `<select class="f-district"><option value="">-Select- (Sankhani)</option>${buildDistrictOptions()}</select>`,
     "District (Boma)"
   ));
 
@@ -144,20 +144,20 @@ function createFarmerRow(index) {
   tr.appendChild(cell(
     "",
     `<input type="text" class="f-ta" maxlength="100" placeholder="e.g. Chindi" autocomplete="off">`,
-    "T/A"
+    "T/A (Mfumu)"
   ));
 
   /* Group Name */
   tr.appendChild(cell(
     "",
     `<input type="text" class="f-group" maxlength="100" placeholder="e.g. Kalonga" autocomplete="off">`,
-    "Group Name"
+    "Group Name (Dzina la Gulu)"
   ));
 
   /* Satisfied? Eya / Ayi */
   tr.appendChild(cell(
     "",
-    `<select class="f-satisfied"><option value="">-Select-</option>` +
+    `<select class="f-satisfied"><option value="">-Select- (Sankhani)</option>` +
     `<option value="Eya">Eya</option><option value="Ayi">Ayi</option></select>`,
     "Satisfied? (Eya/Ayi)"
   ));
@@ -165,9 +165,9 @@ function createFarmerRow(index) {
   /* Follow Up Visit? Eya / Ayi */
   tr.appendChild(cell(
     "",
-    `<select class="f-follow"><option value="">-Select-</option>` +
+    `<select class="f-follow"><option value="">-Select- (Sankhani)</option>` +
     `<option value="Eya">Eya</option><option value="Ayi">Ayi</option></select>`,
-    "Follow Up Visit"
+    "Follow Up Visit (Eya/Ayi)"
   ));
 
   /* Comments */
@@ -178,7 +178,7 @@ function createFarmerRow(index) {
   ));
 
   /* Delete button */
-  const actionTd = cell("actions-col", `<button type="button" class="delete-row" title="Delete this row">x</button>`, "Action");
+  const actionTd = cell("actions-col", `<button type="button" class="delete-row" title="Delete this row (Chotsani mzere uwu)">x</button>`, "Action (Zochita)");
   tr.appendChild(actionTd);
 
   return tr;
@@ -193,7 +193,7 @@ function updateRowNumbers() {
 
 /* Update the "N farmer(s)" counter */
 function updateRowCount() {
-  elRowCountLabel.textContent = `${elTableBody.children.length} farmer(s)`;
+  elRowCountLabel.textContent = `${elTableBody.children.length} farmer(s) / alimi`;
 }
 
 /* Add an empty row at the end of the table */
@@ -491,7 +491,7 @@ async function handleSubmit(event) {
 
   /* Disable the button while the request is in flight */
   elSubmitBtn.disabled = true;
-  elSubmitBtn.textContent = "Submitting...";
+  elSubmitBtn.textContent = "Submitting... (Kutumiza...)";
 
   try {
     const result = await submitToAppsScript(payload);
@@ -523,7 +523,7 @@ async function handleSubmit(event) {
     showBanner("error", `Submission failed. Please check your connection and try again. (${err.message})`);
   } finally {
     elSubmitBtn.disabled = false;
-    elSubmitBtn.textContent = "Submit Report";
+    elSubmitBtn.textContent = "Submit Report (Tumizani Ripoti)";
     /* Bring the result into view */
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -599,7 +599,7 @@ function applySession(session) {
   elSessionId.textContent = session.submissionId || "unknown";
   elSessionNote.textContent = "CBV details are locked. Submit again to add more farmers under this same report.";
   elSessionBanner.hidden = false;
-  elResetBtn.textContent = "Start New Report";
+  elResetBtn.textContent = "Start New Report (Yambani Ripoti Latsopano)";
 }
 
 /* Hard-reset the form to a fully blank, unlocked state (no session) */
@@ -616,7 +616,7 @@ function hardResetForm() {
   elSessionBanner.hidden = true;
   elSessionId.textContent = "";
   elSessionNote.textContent = "";
-  elResetBtn.textContent = "Reset Form";
+  elResetBtn.textContent = "Reset Form (Bwezerani Fomu)";
 }
 
 /* The Reset button asks first when a session is active */
