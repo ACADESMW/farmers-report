@@ -25,10 +25,10 @@
     <!-- Active CBV session banner (shown while a session is saved) -->
     <div id="sessionBanner" class="session-banner" role="status" hidden>
       <div class="session-text">
-        <strong>Active session</strong> &mdash; Report ID: <span id="sessionId"></span>
+        <strong>Active session (Gawo logwira ntchito)</strong> &mdash; Report ID (Nambala ya Ripoti): <span id="sessionId"></span>
         <p id="sessionNote"></p>
       </div>
-      <button type="button" id="endSessionBtn" class="btn btn-ghost">End Session</button>
+      <button type="button" id="endSessionBtn" class="btn btn-ghost">End Session (Kuthetsa Gawo)</button>
     </div>
 
     <!-- novalidate: all validation is handled in script.js so we can show custom messages -->
@@ -88,7 +88,7 @@
 
           <!-- T/A -->
           <div class="field">
-            <label for="cbvTa">T/A <span class="req" title="Required">*</span></label>
+            <label for="cbvTa">T/A (Mfumu) <span class="req" title="Required">*</span></label>
             <input type="text" id="cbvTa" name="cbvTa" minlength="2" maxlength="100"
                    placeholder="e.g. Chindi">
             <p class="field-error" id="cbvTa-error"></p>
@@ -127,7 +127,7 @@
             <label for="commonQuestions">What are the questions farmers ask you most often? (Kodi ndi mafunso anji amene alimi amakufunsani kawirikawiri)</label>
             <textarea id="commonQuestions" name="commonQuestions" rows="4" maxlength="5000"
                       placeholder="Type the questions farmers ask you most often here..."></textarea>
-            <p class="field-hint">Optional</p>
+            <p class="field-hint">Optional (Zosafunikira)</p>
           </div>
         </div>
       </section>
@@ -154,14 +154,14 @@
                 <th class="row-no" scope="col">#</th>
                 <th scope="col">Farmer Name (Dzina) <span class="req">*</span></th>
                 <th scope="col">Age (Zaka) <span class="req">*</span></th>
-                <th scope="col">Gender <span class="req">*</span></th>
+                <th scope="col">Gender (Mamuna/Mkazi) <span class="req">*</span></th>
                 <th scope="col">District (Boma) <span class="req">*</span></th>
-                <th scope="col">T/A <span class="req">*</span></th>
-                <th scope="col">Group Name <span class="req">*</span></th>
+                <th scope="col">T/A (Mfumu) <span class="req">*</span></th>
+                <th scope="col">Group Name (Dzina la Gulu) <span class="req">*</span></th>
                 <th scope="col">Satisfied? (Eya/Ayi) <span class="req">*</span></th>
                 <th scope="col">Follow Up Visit (Eya/Ayi) <span class="req">*</span></th>
                 <th scope="col">Comments (Zowonjezera)</th>
-                <th class="actions-col" scope="col">Action</th>
+                <th class="actions-col" scope="col">Action (Zochita)</th>
               </tr>
             </thead>
             <tbody id="farmerTableBody">
@@ -171,15 +171,15 @@
         </div>
 
         <div class="table-toolbar">
-          <button type="button" id="addRowBtn" class="btn btn-secondary">+ Add Row</button>
+          <button type="button" id="addRowBtn" class="btn btn-secondary">+ Add Row (Onjezani Mzere)</button>
           <span class="table-count" id="rowCountLabel">0 farmer(s)</span>
         </div>
         <p class="field-error" id="farmerTable-error"></p>
       </section>
       <!-- ============ Submit actions ============ -->
       <div class="form-actions">
-        <button type="submit" id="submitBtn" class="btn btn-primary">Submit Report</button>
-        <button type="reset" id="resetBtn" class="btn btn-ghost">Reset Form</button>
+        <button type="submit" id="submitBtn" class="btn btn-primary">Submit Report (Tumizani Ripoti)</button>
+        <button type="reset" id="resetBtn" class="btn btn-ghost">Reset Form (Bwezerani Fomu)</button>
       </div>
 
     </form>
