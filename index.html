@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CBV and Farmer reporting form - Farmers Report project.">
+  <title>Farmers Report - CBV &amp; Farmer Registration</title>
+  <!-- Styling -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ============ Header ============ -->
+  <header class="site-header">
+    <div class="container header-inner">
+      <img src="ACADES-logo.png" alt="ACADES AI Farmer logo" class="header-logo">
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Success / error banner (hidden until needed) -->
+    <div id="banner" class="banner" role="alert" hidden></div>
+
+    <!-- novalidate: all validation is handled in script.js so we can show custom messages -->
+    <form id="farmerForm" novalidate>
+
+      <!-- ============ Section 1 : CBV ============ -->
+      <section class="card" aria-labelledby="sec1-title">
+        <div class="section-head">
+          <span class="section-no" aria-hidden="true">1</span>
+          <div>
+            <h2 id="sec1-title">CBV Section (Gawo lama CBV)</h2>
+            <p class="section-sub">Community Based Volunteer details</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <!-- Name -->
+          <div class="field">
+            <label for="cbvName">Name (Dzina Lanu) <span class="req" title="Required">*</span></label>
+            <input type="text" id="cbvName" name="cbvName" minlength="2" maxlength="100" autocomplete="name"
+                   placeholder="e.g. Kamuzu Banda">
+            <p class="field-error" id="cbvName-error"></p>
+          </div>
+
+          <!-- Age -->
+          <div class="field">
+            <label for="cbvAge">Age (Zaka zanu) <span class="req" title="Required">*</span></label>
+            <input type="number" id="cbvAge" name="cbvAge" min="5" max="120" step="1" inputmode="numeric"
+                   placeholder="e.g. 30">
+            <p class="field-error" id="cbvAge-error"></p>
+          </div>
+
+          <!-- Gender (radio buttons, as in the Google Form) -->
+          <div class="field">
+            <span class="field-label">Gender (Mamuna kapena Mkazi) <span class="req" title="Required">*</span></span>
+            <div class="radio-group" role="group" aria-label="Gender">
+              <label class="radio">
+                <input type="radio" name="cbvGender" value="Mamuna">
+                <span>Mamuna</span>
+              </label>
+              <label class="radio">
+                <input type="radio" name="cbvGender" value="Mkazi">
+                <span>Mkazi</span>
+              </label>
+            </div>
+            <p class="field-error" id="cbvGender-error"></p>
+          </div>
+
+          <!-- District (options injected from script.js) -->
+          <div class="field">
+            <label for="cbvDistrict">District (Boma) <span class="req" title="Required">*</span></label>
+            <select id="cbvDistrict" name="cbvDistrict">
+              <option value="">Select District (Sankhani Boma)...</option>
+            </select>
+            <p class="field-error" id="cbvDistrict-error"></p>
+          </div>
+
+          <!-- T/A -->
+          <div class="field">
+            <label for="cbvTa">T/A <span class="req" title="Required">*</span></label>
+            <input type="text" id="cbvTa" name="cbvTa" minlength="2" maxlength="100"
+                   placeholder="e.g. Chindi">
+            <p class="field-error" id="cbvTa-error"></p>
+          </div>
+
+          <!-- Group -->
+          <div class="field">
+            <label for="cbvGroup">Group (Dzina la Gulu) <span class="req" title="Required">*</span></label>
+            <input type="text" id="cbvGroup" name="cbvGroup" minlength="2" maxlength="100"
+                   placeholder="e.g. Kalonga">
+            <p class="field-error" id="cbvGroup-error"></p>
+          </div>
+        </div>
+      </section>
+      <!-- ============ Section 2 : Farmers ============ -->
+      <section class="card" aria-labelledby="sec2-title">
+        <div class="section-head">
+          <span class="section-no" aria-hidden="true">2</span>
+          <div>
+            <h2 id="sec2-title">Farmers Section (Gawo la Alimi)</h2>
+            <p class="section-sub">Summary of the farmers you reached out to</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <!-- Farmers reached -->
+          <div class="field">
+            <label for="reachedCount">How many Farmers have you reached out (Mwafikira Alimi angati?) <span class="req" title="Required">*</span></label>
+            <input type="number" id="reachedCount" name="reachedCount" min="0" max="10000" step="1" inputmode="numeric"
+                   placeholder="e.g. 25">
+            <p class="field-error" id="reachedCount-error"></p>
+          </div>
+
+          <!-- Common questions -->
+          <div class="field span-2">
+            <label for="commonQuestions">What are the questions farmers ask you most often? (Kodi ndi mafunso anji amene alimi amakufunsani kawirikawiri)</label>
+            <textarea id="commonQuestions" name="commonQuestions" rows="4" maxlength="5000"
+                      placeholder="Type the questions farmers ask you most often here..."></textarea>
+            <p class="field-hint">Optional</p>
+          </div>
+        </div>
+      </section>
+      <!-- ============ Section 3 : Farmer Details Table ============ -->
+      <section class="card" aria-labelledby="sec3-title">
+        <div class="section-head">
+          <span class="section-no" aria-hidden="true">3</span>
+          <div>
+            <h2 id="sec3-title">Farmer Details (Zambiri za Alimi)</h2>
+            <p class="section-sub">Fill this Form for more information about farmers. Add one row per farmer.</p>
+          </div>
+        </div>
+
+        <p class="hint">
+          Fill this form for more information about farmers - add one row per farmer, tap
+          <strong>+ Add Row</strong> to add more rows.
+        </p>
+
+        <!-- The table is horizontally scrollable so it stays usable on phones -->
+        <div class="table-scroll">
+          <table id="farmerTable" class="farmer-table">
+            <thead>
+              <tr>
+                <th class="row-no" scope="col">#</th>
+                <th scope="col">Farmer Name (Dzina) <span class="req">*</span></th>
+                <th scope="col">Age (Zaka) <span class="req">*</span></th>
+                <th scope="col">Gender <span class="req">*</span></th>
+                <th scope="col">District (Boma) <span class="req">*</span></th>
+                <th scope="col">T/A <span class="req">*</span></th>
+                <th scope="col">Group Name <span class="req">*</span></th>
+                <th scope="col">Satisfied? (Eya/Ayi) <span class="req">*</span></th>
+                <th scope="col">Follow Up Visit (Eya/Ayi) <span class="req">*</span></th>
+                <th scope="col">Comments (Zowonjezera)</th>
+                <th class="actions-col" scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody id="farmerTableBody">
+              <!-- Farmer rows are generated by script.js -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-toolbar">
+          <button type="button" id="addRowBtn" class="btn btn-secondary">+ Add Row</button>
+          <span class="table-count" id="rowCountLabel">0 farmer(s)</span>
+        </div>
+        <p class="field-error" id="farmerTable-error"></p>
+      </section>
+      <!-- ============ Submit actions ============ -->
+      <div class="form-actions">
+        <button type="submit" id="submitBtn" class="btn btn-primary">Submit Report</button>
+        <button type="reset" id="resetBtn" class="btn btn-ghost">Reset Form</button>
+      </div>
+
+    </form>
+  </main>
+
+  <!-- ============ Footer ============ -->
+  <footer class="site-footer">
+    <div class="container">
+      <p>Submissions are sent securely to the project database. Users never have direct access to the spreadsheet.</p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
