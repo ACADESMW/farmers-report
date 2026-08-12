@@ -175,24 +175,59 @@ function getSubmissionByCbv_(subSheet, cbvName) {
   return null;
 }
 
+/* Normalize a header for matching: lower-case, drop bracketed notes such as
+   "(Dzina)" / "(Eya/Ayi)", collapse whitespace. */
+function normalizeHeader_(text) {
+  return String(text)
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/* Match a sheet header to one of the canonical FARMER_HEADERS. Tolerates the
+   bilingual labels the sheet uses (e.g. "Farmer Name (Dzina)",
+   "Satisfied? (Eya/Ayi)"). Returns the canonical header text, or "" if no
+   match. */
+function matchFarmerHeader_(sheetHeader) {
+  const normalized = normalizeHeader_(sheetHeader);
+  if (!normalized) return "";
+  const candidates = FARMER_HEADERS.filter((h) => {
+    const n = normalizeHeader_(h);
+    return n && (normalized === n || normalized.includes(n) || n.includes(normalized));
+  });
+  if (!candidates.length) return "";
+  const exact = candidates.filter((h) => normalizeHeader_(h) === normalized);
+  const pool = exact.length ? exact : candidates;
+  pool.sort((a, b) => normalizeHeader_(b).length - normalizeHeader_(a).length);
+  return pool[0];
+}
+
 /* Find a column's 1-based index by its header text. Returns 0 if not found. */
 function findColumnByHeader_(sheet, headerText) {
   const lastCol = sheet.getLastColumn();
   if (lastCol < 1) return 0;
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const wanted = normalizeHeader_(headerText);
   for (let i = 0; i < headers.length; i++) {
-    if (String(headers[i]).trim() === headerText) return i + 1;
+    if (normalizeHeader_(headers[i]) === wanted) return i + 1;
+  }
+  for (let i = 0; i < headers.length; i++) {
+    const n = normalizeHeader_(headers[i]);
+    if (n && (n.includes(wanted) || wanted.includes(n))) return i + 1;
   }
   return 0;
 }
 
-/* Map every header name to its 1-based column index in the Farmers sheet. */
+/* Map every canonical farmer header name to its 1-based column index in the
+   Farmers sheet, matching headers that carry bilingual labels. */
 function getFarmerColumnMap_(farmSheet) {
   const lastCol = farmSheet.getLastColumn();
   const headers = farmSheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const map = {};
   for (let i = 0; i < headers.length; i++) {
-    map[String(headers[i]).trim()] = i + 1;
+    const canonical = matchFarmerHeader_(headers[i]);
+    if (canonical && map[canonical] == null) map[canonical] = i + 1;
   }
   return map;
 }
