@@ -5,17 +5,16 @@
  * to a private Google Sheet.
  *
  * Two sheets are managed inside the spreadsheet:
- *   Submissions - one row per report (CBV + summary), keyed by Submission ID.
- *   Farmers     - one row per farmer, linked back to a report by Submission ID.
+ *   Submissions - one row per CBV report (CBV details + summary).
+ *   Farmers     - one row per farmer, identified by the CBV name.
  *
- * Continuation: a CBV keeps ONE Submission ID for life. If a payload arrives
- * carrying an existing submissionId that belongs to the same CBV, or the CBV
- * can be matched to an existing report by identity (name + district + group),
- * only the new farmer rows are appended under that ID and the Submissions
- * row's summary numbers (Farmers Reached / Number of Farmers) are refreshed.
- * No duplicate Submissions row is created for the same CBV, so the ID stays
- * the same even when data is entered at different times, on different days,
- * or from a different device/browser.
+ * Linking: the two tables are linked by the CBV's name (Name / Dzina Lanu),
+ * the same name entered in the CBV section. Farmers accumulate under the name
+ * of the CBV who submitted them, so the same CBV always lands in the same
+ * report no matter when, or from which device/browser, they submit. Only the
+ * new farmer rows are appended and the Submissions row's summary numbers
+ * (Farmers Reached / Number of Farmers) are refreshed. No duplicate
+ * Submissions row is created for the same CBV.
  */
 
 const SPREADSHEET_ID = "1XtMJTwIgBbMLitbYrp2k9r-lUwVQ9YdSgWiNqwP0zbQ";
@@ -43,8 +42,8 @@ const SUBMISSION_HEADERS = [
 ];
 
 const FARMER_HEADERS = [
-  "Submission ID",
   "Row #",
+  "CBV Name",
   "Farmer Name",
   "Age",
   "Gender",
@@ -85,42 +84,37 @@ function doPost(e) {
     const farmSheet = ss.getSheetByName(FARMERS_SHEET) || ss.insertSheet(FARMERS_SHEET);
 
     if (subSheet.getLastRow() === 0) subSheet.appendRow(SUBMISSION_HEADERS);
-    if (farmSheet.getLastRow() === 0) farmSheet.appendRow(FARMER_HEADERS);
+    ensureFarmerSheet_(farmSheet);
 
     const cbv = payload.cbv || {};
     const summary = payload.summary || {};
+    const cbvName = String(cbv.name || "").trim();
 
-    /* The CBV keeps ONE Submission ID for life. Prefer the ID this browser
-       already knows, then fall back to matching the CBV by identity
-       (name + district + group) so the same person reuses the same ID even
-       when they submit from a different device, browser or on a later date. */
-    const requestedId = String(payload.submissionId || "").trim();
-    let existing = null;
-
-    if (requestedId) {
-      const byId = getSubmissionRow_(subSheet, requestedId);
-      /* Only trust a client-provided ID if it really belongs to this CBV. */
-      if (byId && sameCbv_(byId.values, cbv)) existing = byId;
-    }
-    if (!existing) {
-      existing = getSubmissionByCbv_(subSheet, cbv);
+    if (!cbvName) {
+      return respond(false, "CBV name is required.");
     }
 
-    /* ---------- Follow-up: append farmers under the existing report ---------- */
+    /* The two tables are linked by the CBV's name (Name / Dzina Lanu), so the
+       same CBV always accumulates farmers under one report - no matter when,
+       or from which device or browser, they submit. */
+    const existing = getSubmissionByCbv_(subSheet, cbvName);
+
+    /* ---------- Same CBV: append farmers under their existing report ---------- */
     if (existing) {
-      const submissionId = existing.values[0];
-      const startRowNo = countFarmerRows_(farmSheet, submissionId);
-      const appended = appendFarmerRows_(farmSheet, submissionId, startRowNo, payload.farmers || []);
-      const total = countFarmerRows_(farmSheet, submissionId);
+      const startRowNo = countFarmerRows_(farmSheet, cbvName);
+      const appended = appendFarmerRows_(farmSheet, existing.values[0], cbvName, startRowNo, payload.farmers || []);
+      const total = countFarmerRows_(farmSheet, cbvName);
       updateSubmissionSummary_(subSheet, existing.row, summary, total);
+      backfillCbvNames_(subSheet, farmSheet);
       return respond(true, "Farmers added to the existing report.", {
-        submissionId: submissionId,
+        submissionId: existing.values[0],
+        cbvName: cbvName,
         appended: appended.length,
         totalFarmers: total,
       });
     }
 
-    /* ---------- New submission ---------- */
+    /* ---------- New CBV: create their first report ---------- */
     const submissionId = "FR-" + Utilities.getUuid().slice(0, 8).toUpperCase();
     const now = new Date();
 
@@ -137,14 +131,16 @@ function doPost(e) {
       summary.commonQuestions || "",
     ]);
 
-    const appended = appendFarmerRows_(farmSheet, submissionId, 0, payload.farmers || []);
-    const total = countFarmerRows_(farmSheet, submissionId);
+    const appended = appendFarmerRows_(farmSheet, submissionId, cbvName, 0, payload.farmers || []);
+    const total = countFarmerRows_(farmSheet, cbvName);
 
     const subRow = getSubmissionRow_(subSheet, submissionId);
     if (subRow) updateSubmissionSummary_(subSheet, subRow.row, summary, total);
+    backfillCbvNames_(subSheet, farmSheet);
 
     return respond(true, "Report submitted successfully.", {
       submissionId: submissionId,
+      cbvName: cbvName,
       appended: appended.length,
       totalFarmers: total,
     });
@@ -166,64 +162,174 @@ function getSubmissionRow_(subSheet, requestedId) {
   return null;
 }
 
-/* Compare a Submissions row to the submitted CBV details (identity check). */
-function sameCbv_(rowValues, cbv) {
-  return (
-    String(rowValues[2]).trim() === String(cbv.name || "").trim() &&
-    String(rowValues[5]).trim() === String(cbv.district || "").trim() &&
-    String(rowValues[7]).trim() === String(cbv.group || "").trim()
-  );
-}
-
-/* Find an existing submission for the same CBV (name + district + group). */
-function getSubmissionByCbv_(subSheet, cbv) {
+/* Find an existing submission for the same CBV by name. */
+function getSubmissionByCbv_(subSheet, cbvName) {
   const lastRow = subSheet.getLastRow();
   if (lastRow < 2) return null;
   const data = subSheet.getRange(2, 1, lastRow - 1, SUBMISSION_HEADERS.length).getValues();
   for (let i = 0; i < data.length; i++) {
-    if (sameCbv_(data[i], cbv)) {
+    if (String(data[i][2]).trim() === String(cbvName).trim()) {
       return { row: i + 2, values: data[i] };
     }
   }
   return null;
 }
 
-/* Count how many farmer rows already exist for a submission. */
-function countFarmerRows_(farmSheet, requestedId) {
+/* Find a column's 1-based index by its header text. Returns 0 if not found. */
+function findColumnByHeader_(sheet, headerText) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return 0;
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (let i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim() === headerText) return i + 1;
+  }
+  return 0;
+}
+
+/* Map every header name to its 1-based column index in the Farmers sheet. */
+function getFarmerColumnMap_(farmSheet) {
+  const lastCol = farmSheet.getLastColumn();
+  const headers = farmSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const map = {};
+  for (let i = 0; i < headers.length; i++) {
+    map[String(headers[i]).trim()] = i + 1;
+  }
+  return map;
+}
+
+/* Make sure the Farmers sheet has a "CBV Name" column. The user may have added
+   it manually anywhere - if it exists, its position is respected. If it is
+   missing, insert it right after "Row #" (or "Submission ID" on legacy sheets). */
+function ensureFarmerSheet_(farmSheet) {
+  if (farmSheet.getLastRow() === 0) {
+    farmSheet.appendRow(FARMER_HEADERS);
+    return;
+  }
+  if (findColumnByHeader_(farmSheet, "CBV Name")) return;
+
+  const after = findColumnByHeader_(farmSheet, "Row #") ||
+                findColumnByHeader_(farmSheet, "Submission ID");
+  if (after) {
+    farmSheet.insertColumnAfter(after);
+    farmSheet.getRange(1, after + 1).setValue("CBV Name");
+  } else {
+    farmSheet.getRange(1, farmSheet.getLastColumn() + 1).setValue("CBV Name");
+  }
+}
+
+/* Count how many farmer rows already exist for a CBV (by CBV name). */
+function countFarmerRows_(farmSheet, cbvName) {
+  const cbvCol = findColumnByHeader_(farmSheet, "CBV Name");
+  if (!cbvCol) return 0;
   const lastRow = farmSheet.getLastRow();
   if (lastRow < 2) return 0;
-  const data = farmSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const data = farmSheet.getRange(2, cbvCol, lastRow - 1, 1).getValues();
   let count = 0;
   for (let i = 0; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(requestedId).trim()) count++;
+    if (String(data[i][0]).trim() === String(cbvName).trim()) count++;
   }
   return count;
 }
 
-/* Append farmer rows for a submission, continuing the Row # sequence. Returns the rows. */
-function appendFarmerRows_(farmSheet, requestedId, startRowNo, farmers) {
+/* Append farmer rows, writing each value into its header-matched column so the
+   exact column order on the sheet does not matter. Returns the rows. */
+function appendFarmerRows_(farmSheet, submissionId, cbvName, startRowNo, farmers) {
+  const map = getFarmerColumnMap_(farmSheet);
+  const cols = {
+    id: map["Submission ID"] || 0,
+    rowNo: map["Row #"] || 0,
+    cbvName: map["CBV Name"] || 0,
+    name: map["Farmer Name"] || 0,
+    age: map["Age"] || 0,
+    gender: map["Gender"] || 0,
+    district: map["District"] || 0,
+    ta: map["T/A"] || 0,
+    group: map["Group Name"] || 0,
+    satisfied: map["Satisfied"] || 0,
+    followUp: map["Follow Up"] || 0,
+    comments: map["Comments"] || 0,
+  };
+  if (!cols.rowNo || !cols.cbvName) {
+    throw new Error("Farmers sheet is missing the 'Row #' or 'CBV Name' column.");
+  }
+
+  const width = farmSheet.getLastColumn();
   const rows = [];
   let rowNo = startRowNo;
   farmers.forEach((f) => {
     rowNo++;
-    rows.push([
-      requestedId,
-      rowNo,
-      f.name || "",
-      f.age != null ? f.age : "",
-      f.gender || "",
-      f.district || "",
-      f.ta || "",
-      f.groupName || "",
-      f.satisfied || "",
-      f.followUp || "",
-      f.comments || "",
-    ]);
+    const row = new Array(width).fill("");
+    const set = (col, value) => { if (col) row[col - 1] = value; };
+    set(cols.id, submissionId);
+    set(cols.rowNo, rowNo);
+    set(cols.cbvName, cbvName);
+    set(cols.name, f.name || "");
+    set(cols.age, f.age != null ? f.age : "");
+    set(cols.gender, f.gender || "");
+    set(cols.district, f.district || "");
+    set(cols.ta, f.ta || "");
+    set(cols.group, f.groupName || "");
+    set(cols.satisfied, f.satisfied || "");
+    set(cols.followUp, f.followUp || "");
+    set(cols.comments, f.comments || "");
+    rows.push(row);
   });
   if (rows.length) {
-    farmSheet.getRange(farmSheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    farmSheet.getRange(farmSheet.getLastRow() + 1, 1, rows.length, width).setValues(rows);
   }
   return rows;
+}
+
+/* Auto-generate the CBV Name column from the Submissions table: for every
+   farmer row whose CBV Name is blank, look up the Submission ID (the link to
+   the Submissions sheet) and copy that CBV's name across. Returns how many
+   rows were filled. */
+function backfillCbvNames_(subSheet, farmSheet) {
+  if (!subSheet || !farmSheet) return 0;
+
+  const nameById = {};
+  if (subSheet.getLastRow() > 1) {
+    const subValues = subSheet
+      .getRange(2, 1, subSheet.getLastRow() - 1, SUBMISSION_HEADERS.length)
+      .getValues();
+    for (let i = 0; i < subValues.length; i++) {
+      const id = String(subValues[i][0]).trim();
+      const name = String(subValues[i][2]).trim();
+      if (id && name) nameById[id] = name;
+    }
+  }
+
+  const map = getFarmerColumnMap_(farmSheet);
+  const cbvCol = map["CBV Name"] || 0;
+  const idCol = map["Submission ID"] || 0;
+  const lastRow = farmSheet.getLastRow();
+  if (!cbvCol || lastRow < 2) return 0;
+
+  const width = farmSheet.getLastColumn();
+  const range = farmSheet.getRange(2, 1, lastRow - 1, width);
+  const values = range.getValues();
+  let updated = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (String(values[i][cbvCol - 1]).trim()) continue;
+    let name = "";
+    if (idCol) name = nameById[String(values[i][idCol - 1]).trim()] || "";
+    if (!name) continue;
+    values[i][cbvCol - 1] = name;
+    updated++;
+  }
+  if (updated) range.setValues(values);
+  return updated;
+}
+
+/* Run manually from the Apps Script editor to fill the CBV Name column once. */
+function backfillCbvNames() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const filled = backfillCbvNames_(
+    ss.getSheetByName(SUBMISSIONS_SHEET),
+    ss.getSheetByName(FARMERS_SHEET)
+  );
+  Logger.log("Backfilled CBV names on " + filled + " farmer row(s).");
+  return filled;
 }
 
 /* Refresh the "Farmers Reached" and "Number of Farmers" cells on a Submissions row. */

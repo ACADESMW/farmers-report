@@ -19,24 +19,37 @@ Google Sheet through a Google Apps Script Web App. Users never touch the Sheet.
 
 The script creates (or reuses) two sheets inside your spreadsheet:
 
-1. **Submissions** - one row per form submission with the CBV and summary answers.
-2. **Farmers** - one row per farmer entered in the table, linked back to the
-   submission by a shared `Submission ID`.
+1. **Submissions** - one row per CBV with the CBV details and summary answers.
+2. **Farmers** - one row per farmer, linked back to the CBV by the **CBV name**
+   (the `CBV Name` column, matching the name entered in the CBV section).
+
+The two tables are linked by the **CBV name**, so every farmer a CBV submits
+accumulates under that CBV's name - even when data is entered at different
+times or from a different device/browser.
+
+The Farmers sheet's **CBV Name** column is filled in automatically from the
+**Submissions** table: new farmer rows get the CBV's name on submit, and any
+older rows whose CBV Name is blank are backfilled by looking up their
+`Submission ID` in the Submissions sheet. The column can live anywhere in the
+Farmers sheet - the script finds it by its header. If it is missing, the script
+inserts it right after the `Row #` column. To fill existing rows right now, run
+the `backfillCbvNames` function once from the Apps Script editor.
 
 ### CBV sessions (adding farmers over time)
 
-- After the first submit, the browser keeps the **CBV details and the
-  `Submission ID`** in `localStorage` (a "session").
+- After the first submit, the browser keeps the **CBV details** in
+  `localStorage` (a "session").
 - On their next visit, the CBV section is pre-filled and **locked**, the farmer
   table is cleared, and the form is ready for a new batch of farmers.
-- Submitting again **appends the new farmer rows under the same `Submission ID`**
-  in the **Farmers** sheet and updates that submission's "Farmers Reached" /
+- Submitting again **appends the new farmer rows under the same CBV name** in
+  the **Farmers** sheet and updates that CBV's "Farmers Reached" /
   "Number of Farmers" numbers. No duplicate submission row is created.
 - Use the **Start New Report** button to end the session and begin a fresh
   submission (this clears the browser storage for that CBV).
 
-> Session storage lives in the CBV's own browser. Clearing the browser data
-> (or using a different device) starts a new session and a new Submission ID.
+> Even if the browser session is lost (cleared storage or a different device),
+> the CBV keeps their single report because farmers are matched by the CBV
+> name, not by any session/browser ID.
 
 ---
 
@@ -87,6 +100,6 @@ Open `index.html` in a browser and:
 - Confirm all 28 districts appear in both dropdowns.
 - Submit with empty fields to check the validation messages.
 - Enter a full farmer row, submit, then reload - the CBV section should be
-  locked with the same Report ID and a fresh empty farmer table.
-- Submit again to confirm the new farmers are appended under the same ID.
+  locked with the same CBV name and a fresh empty farmer table.
+- Submit again to confirm the new farmers are appended under the same CBV name.
 - Use **Start New Report** to begin a fresh submission.
