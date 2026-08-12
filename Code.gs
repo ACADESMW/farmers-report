@@ -8,11 +8,14 @@
  *   Submissions - one row per report (CBV + summary), keyed by Submission ID.
  *   Farmers     - one row per farmer, linked back to a report by Submission ID.
  *
- * Continuation: if a payload arrives carrying an existing submissionId, this
- * is a follow-up submission from the same CBV. Only the new farmer rows are
- * appended under that ID and the Submissions row's summary numbers (Farmers
- * Reached / Number of Farmers) are refreshed. No duplicate Submissions row is
- * created.
+ * Continuation: a CBV keeps ONE Submission ID for life. If a payload arrives
+ * carrying an existing submissionId that belongs to the same CBV, or the CBV
+ * can be matched to an existing report by identity (name + district + group),
+ * only the new farmer rows are appended under that ID and the Submissions
+ * row's summary numbers (Farmers Reached / Number of Farmers) are refreshed.
+ * No duplicate Submissions row is created for the same CBV, so the ID stays
+ * the same even when data is entered at different times, on different days,
+ * or from a different device/browser.
  */
 
 const SPREADSHEET_ID = "1XtMJTwIgBbMLitbYrp2k9r-lUwVQ9YdSgWiNqwP0zbQ";
@@ -84,17 +87,34 @@ function doPost(e) {
     if (subSheet.getLastRow() === 0) subSheet.appendRow(SUBMISSION_HEADERS);
     if (farmSheet.getLastRow() === 0) farmSheet.appendRow(FARMER_HEADERS);
 
+    const cbv = payload.cbv || {};
+    const summary = payload.summary || {};
+
+    /* The CBV keeps ONE Submission ID for life. Prefer the ID this browser
+       already knows, then fall back to matching the CBV by identity
+       (name + district + group) so the same person reuses the same ID even
+       when they submit from a different device, browser or on a later date. */
     const requestedId = String(payload.submissionId || "").trim();
-    const existing = requestedId ? getSubmissionRow_(subSheet, requestedId) : null;
+    let existing = null;
+
+    if (requestedId) {
+      const byId = getSubmissionRow_(subSheet, requestedId);
+      /* Only trust a client-provided ID if it really belongs to this CBV. */
+      if (byId && sameCbv_(byId.values, cbv)) existing = byId;
+    }
+    if (!existing) {
+      existing = getSubmissionByCbv_(subSheet, cbv);
+    }
 
     /* ---------- Follow-up: append farmers under the existing report ---------- */
     if (existing) {
-      const startRowNo = countFarmerRows_(farmSheet, requestedId);
-      const appended = appendFarmerRows_(farmSheet, requestedId, startRowNo, payload.farmers || []);
-      const total = countFarmerRows_(farmSheet, requestedId);
-      updateSubmissionSummary_(subSheet, existing.row, payload.summary || {}, total);
+      const submissionId = existing.values[0];
+      const startRowNo = countFarmerRows_(farmSheet, submissionId);
+      const appended = appendFarmerRows_(farmSheet, submissionId, startRowNo, payload.farmers || []);
+      const total = countFarmerRows_(farmSheet, submissionId);
+      updateSubmissionSummary_(subSheet, existing.row, summary, total);
       return respond(true, "Farmers added to the existing report.", {
-        submissionId: requestedId,
+        submissionId: submissionId,
         appended: appended.length,
         totalFarmers: total,
       });
@@ -103,8 +123,6 @@ function doPost(e) {
     /* ---------- New submission ---------- */
     const submissionId = "FR-" + Utilities.getUuid().slice(0, 8).toUpperCase();
     const now = new Date();
-    const cbv = payload.cbv || {};
-    const summary = payload.summary || {};
 
     subSheet.appendRow([
       submissionId,
@@ -139,9 +157,31 @@ function doPost(e) {
 function getSubmissionRow_(subSheet, requestedId) {
   const lastRow = subSheet.getLastRow();
   if (lastRow < 2) return null;
-  const data = subSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const data = subSheet.getRange(2, 1, lastRow - 1, SUBMISSION_HEADERS.length).getValues();
   for (let i = 0; i < data.length; i++) {
     if (String(data[i][0]).trim() === String(requestedId).trim()) {
+      return { row: i + 2, values: data[i] };
+    }
+  }
+  return null;
+}
+
+/* Compare a Submissions row to the submitted CBV details (identity check). */
+function sameCbv_(rowValues, cbv) {
+  return (
+    String(rowValues[2]).trim() === String(cbv.name || "").trim() &&
+    String(rowValues[5]).trim() === String(cbv.district || "").trim() &&
+    String(rowValues[7]).trim() === String(cbv.group || "").trim()
+  );
+}
+
+/* Find an existing submission for the same CBV (name + district + group). */
+function getSubmissionByCbv_(subSheet, cbv) {
+  const lastRow = subSheet.getLastRow();
+  if (lastRow < 2) return null;
+  const data = subSheet.getRange(2, 1, lastRow - 1, SUBMISSION_HEADERS.length).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (sameCbv_(data[i], cbv)) {
       return { row: i + 2, values: data[i] };
     }
   }
