@@ -498,8 +498,9 @@ async function handleSubmit(event) {
 
     if (result && result.success) {
       const existing = loadSession();
+      const who = result.cbvName || (payload.cbv && payload.cbv.name) || "";
       if (existing && existing.submissionId) {
-        showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) to report ${existing.submissionId}. The CBV details stay locked for the next batch.`);
+        showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) under CBV: ${who}. The CBV details stay locked for the next batch.`);
       } else {
         saveSession({
           submissionId: result.submissionId || "OK",
@@ -507,7 +508,7 @@ async function handleSubmit(event) {
           cbv: payload.cbv,
           summary: payload.summary,
         });
-        showBanner("success", `Report submitted successfully! Reference ID: ${result.submissionId || "OK"}`);
+        showBanner("success", `Report submitted successfully! Farmers saved under CBV: ${who}`);
       }
       const saved = loadSession();
       if (saved && saved.submissionId) {
