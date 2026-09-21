@@ -43,7 +43,7 @@ function buildDistrictOptions() {
 const $ = (id) => document.getElementById(id);
 
 let elForm, elBanner, elTableBody, elAddRow, elRowCountLabel, elSubmitBtn, elTableError;
-let elResetBtn;
+let elResetBtn, elDownloadSection, elDownloadPdfBtn;
 
 /* ---------------------------------------------------------
    Small helpers
@@ -380,7 +380,6 @@ function validateFarmerRows() {
     if (!cellMap.gender.value) rowErrors.push("Gender is required");
     if (!cellMap.district.value) rowErrors.push("District is required");
     if (!String(cellMap.ta.value).trim()) rowErrors.push("T/A is required");
-    if (!String(cellMap.group.value).trim()) rowErrors.push("Group Name is required");
     if (!cellMap.satisfied.value) rowErrors.push("Satisfied? (Eya/Ayi) is required");
     if (!cellMap.follow.value) rowErrors.push("Follow Up Visit (Eya/Ayi) is required");
 
@@ -392,7 +391,6 @@ function validateFarmerRows() {
         (key === "gender" && !el.value) ||
         (key === "district" && !el.value) ||
         (key === "ta" && !String(el.value).trim()) ||
-        (key === "group" && !String(el.value).trim()) ||
         (key === "satisfied" && !el.value) ||
         (key === "follow" && !el.value);
       el.classList.toggle("invalid", isBad);
@@ -450,6 +448,180 @@ function buildPayload() {
 }
 
 /* ---------------------------------------------------------
+   PDF report download
+   After a successful submit the submitted payload is kept in
+   `lastReport` and the download button is shown. Clicking it
+   builds a PDF (jsPDF + autoTable) and saves it locally.
+   --------------------------------------------------------- */
+let lastReport = null;
+
+/* Human-friendly date/time for the PDF header */
+function formatDateTime(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch (e) {
+    return String(iso);
+  }
+}
+
+/*** Build a jsPDF document from a report object ***/
+function buildReportPdf(report) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  const darkGreen = [23, 130, 64];
+  const grey = [96, 125, 139];
+  const darkGrey = [38, 50, 56];
+
+  const cbv = report.cbv || {};
+  const summary = report.summary || {};
+  const farmers = report.farmers || [];
+
+  /* Header strip */
+  let y = 20;
+  doc.setFillColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+  doc.rect(0, 0, pageWidth, 5, "F");
+
+  doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("ACADES Farmers Report", margin, y);
+  y += 7;
+
+  doc.setTextColor(grey[0], grey[1], grey[2]);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text("CBV & Farmer Registration Report", margin, y);
+  y += 7;
+
+  doc.setFontSize(9);
+  doc.setTextColor(darkGrey[0], darkGrey[1], darkGrey[2]);
+  doc.text(`Submission ID: ${report.submissionId || "N/A"}`, margin, y);
+  y += 5;
+  doc.text(`Submitted: ${formatDateTime(report.submittedAt)}`, margin, y);
+  y += 10;
+
+  /* Green section heading band */
+  const title = (label) => {
+    doc.setFillColor(242, 249, 227);
+    doc.roundedRect(margin, y - 4.5, contentWidth, 9, 1.5, 1.5, "F");
+    doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(label, margin + 4, y + 0.5);
+    y += 11;
+  };
+
+  /* Label / value line that wraps long values */
+  const kv = (k, v) => {
+    const val = String(v == null ? "" : v);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(grey[0], grey[1], grey[2]);
+    const labelWidth = doc.getTextWidth(k) + 6;
+    doc.text(k, margin, y);
+    const valueX = margin + labelWidth + 4;
+    const lines = doc.splitTextToSize(val, pageWidth - valueX - margin);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(darkGrey[0], darkGrey[1], darkGrey[2]);
+    doc.text(lines, valueX, y);
+    y += lines.length * 6;
+  };
+
+  /* --- CBV details --- */
+  title("CBV Details (Zambiri za CBV)");
+  kv("Name (Dzina)", cbv.name);
+  kv("Age (Zaka)", cbv.age);
+  kv("Gender (Jenda)", cbv.gender);
+  kv("District (Boma)", cbv.district);
+  kv("T/A (Mfumu)", cbv.ta);
+  kv("Group (Gulu)", cbv.group);
+  y += 4;
+
+  /* --- Report summary --- */
+  title("Report Summary (Ripoti lachidule)");
+  kv("Farmers Reached (Alimi ofikiridwa)", summary.farmersReached);
+  if (summary.commonQuestions) {
+    kv("Common Questions (Mafunso)", summary.commonQuestions);
+  }
+  y += 4;
+
+  /* --- Farmer details table --- */
+  title(`Farmer Details (Zambiri za Alimi) - ${farmers.length}`);
+  doc.autoTable({
+    startY: y,
+    head: [[
+      "#", "Farmer Name", "Age", "Gender", "District", "T/A",
+      "Group", "Satisfied?", "Follow Up", "Comments",
+    ]],
+    body: farmers.map((f, i) => [
+      i + 1,
+      f.name || "",
+      f.age == null ? "" : String(f.age),
+      f.gender || "",
+      f.district || "",
+      f.ta || "",
+      f.groupName || "",
+      f.satisfied || "",
+      f.followUp || "",
+      f.comments || "",
+    ]),
+    margin: { left: margin, right: margin },
+    styles: {
+      font: "helvetica",
+      fontSize: 8,
+      cellPadding: 2.5,
+      textColor: [38, 50, 56],
+      lineColor: [220, 230, 207],
+      lineWidth: 0.1,
+    },
+    headStyles: {
+      fillColor: [darkGreen[0], darkGreen[1], darkGreen[2]],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+    },
+    alternateRowStyles: { fillColor: [242, 249, 227] },
+  });
+
+  /* Footer */
+  const pageH = doc.internal.pageSize.getHeight();
+  doc.setFontSize(8);
+  doc.setTextColor(grey[0], grey[1], grey[2]);
+  doc.setFont("helvetica", "normal");
+  doc.text("ACADES Farmers Report (Ripoti la Alimi)", margin, pageH - 10);
+
+  return doc;
+}
+
+/*** Build and save the PDF for the last successful submission ***/
+function downloadReportPdf() {
+  if (!lastReport) return;
+  try {
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      throw new Error("PDF library not loaded");
+    }
+    const doc = buildReportPdf(lastReport);
+    const safeId = String(lastReport.submissionId || "report").replace(/[^a-zA-Z0-9_-]/g, "");
+    doc.save(`Farmers_Report_${safeId}.pdf`);
+  } catch (err) {
+    console.error("PDF generation failed:", err);
+    showBanner("error", `Could not generate the PDF. Please check your internet connection. (${err.message})`);
+  }
+}
+
+/*** Reveal the download button with the data of the submitted report ***/
+function showDownloadSection(report) {
+  lastReport = report;
+  elDownloadSection.hidden = false;
+}
+
+/* ---------------------------------------------------------
    Submit to Google Apps Script Web App
    Content-Type is deliberately text/plain: Apps Script Web Apps
    do not always send CORS pre-flight headers, and a text/plain
@@ -498,17 +670,30 @@ async function handleSubmit(event) {
 
     if (result && result.success) {
       const existing = loadSession();
+      const submissionId = existing && existing.submissionId ? existing.submissionId : (result.submissionId || "OK");
+      const submittedAt = new Date().toISOString();
+
       if (existing && existing.submissionId) {
         showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) to report ${existing.submissionId}. The CBV details stay locked for the next batch.`);
       } else {
         saveSession({
-          submissionId: result.submissionId || "OK",
-          submittedAt: new Date().toISOString(),
+          submissionId,
+          submittedAt,
           cbv: payload.cbv,
           summary: payload.summary,
         });
-        showBanner("success", `Report submitted successfully! Reference ID: ${result.submissionId || "OK"}`);
+        showBanner("success", `Report submitted successfully! Reference ID: ${submissionId}`);
       }
+
+      /* Offer the PDF download right below the success message */
+      showDownloadSection({
+        cbv: payload.cbv,
+        summary: payload.summary,
+        farmers: payload.farmers,
+        submissionId,
+        submittedAt,
+      });
+
       const saved = loadSession();
       if (saved && saved.submissionId) {
         applySession(saved);
@@ -643,6 +828,8 @@ function init() {
   elSubmitBtn = $("submitBtn");
   elTableError = $("farmerTable-error");
   elResetBtn = $("resetBtn");
+  elDownloadSection = $("downloadSection");
+  elDownloadPdfBtn = $("downloadPdfBtn");
 
   /* Inject district options into the CBV section */
   $("cbvDistrict").insertAdjacentHTML("beforeend", buildDistrictOptions());
@@ -651,6 +838,7 @@ function init() {
   elAddRow.addEventListener("click", addFarmerRow);
   elForm.addEventListener("submit", handleSubmit);
   elForm.addEventListener("reset", handleFormReset);
+  elDownloadPdfBtn.addEventListener("click", downloadReportPdf);
 
   /* Delegate delete-row clicks to the tbody (works for all rows) */
   elTableBody.addEventListener("click", (event) => {

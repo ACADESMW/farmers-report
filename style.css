@@ -499,6 +499,33 @@ textarea:focus {
   padding: 14px 2px;
 }
 
+/* ---------- Download report card (after a successful submit) ---------- */
+.download-card {
+  background: var(--success-bg);
+  border-color: #a5d6a7;
+  box-shadow: 0 2px 6px rgba(23, 130, 64, 0.12);
+}
+
+.download-card[hidden] {
+  display: none;
+}
+
+.download-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.download-actions .btn {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(23, 130, 64, 0.35);
+}
+
+.download-actions .btn:hover:not(:disabled) {
+  background: var(--primary-dark);
+}
+
 /* ---------- Footer ---------- */
 .site-footer {
   background: var(--primary-darker);
@@ -706,6 +733,11 @@ textarea {
 
   .form-actions {
     flex-direction: column;
+  }
+
+  .download-actions .btn {
+    width: 100%;
+    min-height: 50px;
   }
 
   .form-actions .btn {

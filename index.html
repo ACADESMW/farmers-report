@@ -22,6 +22,20 @@
     <!-- Success / error banner (hidden until needed) -->
     <div id="banner" class="banner" role="alert" hidden></div>
 
+    <!-- Download report card (shown right after a successful submit) -->
+    <div id="downloadSection" class="card download-card" hidden>
+      <div class="section-head">
+        <span class="section-no" aria-hidden="true">&#10003;</span>
+        <div>
+          <h2>Report Ready (Lipoti Lakwana)</h2>
+          <p class="section-sub">Download your submitted report as a PDF file.</p>
+        </div>
+      </div>
+      <div class="download-actions">
+        <button type="button" id="downloadPdfBtn" class="btn btn-primary">Download Report (Pangani Download Lipoti Lanu)</button>
+      </div>
+    </div>
+
     <!-- novalidate: all validation is handled in script.js so we can show custom messages -->
     <form id="farmerForm" novalidate>
 
@@ -148,7 +162,7 @@
                 <th scope="col">Gender (Mamuna/Mkazi) <span class="req">*</span></th>
                 <th scope="col">District (Boma) <span class="req">*</span></th>
                 <th scope="col">T/A (Mfumu) <span class="req">*</span></th>
-                <th scope="col">Group Name (Dzina la Gulu) <span class="req">*</span></th>
+                <th scope="col">Group Name (Dzina la Gulu)</th>
                 <th scope="col">Satisfied? (Eya/Ayi) <span class="req">*</span></th>
                 <th scope="col">Follow Up Visit (Eya/Ayi) <span class="req">*</span></th>
                 <th scope="col">Comments (Zowonjezera)</th>
@@ -181,6 +195,10 @@
     <div class="container">
     </div>
   </footer>
+
+  <!-- PDF generation (jsPDF + autoTable) loaded from a public CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
   <script src="script.js"></script>
 </body>
