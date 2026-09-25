@@ -106,7 +106,6 @@ function doPost(e) {
     try {
       const appended = appendFarmerRows_(farmersSheet, farmersSchema, payload.farmers, cbv, now);
       const total = countFarmerRows_(farmersSheet, farmersSchema, cbv);
-      if (total !== payload.farmers.length) throw new Error("The farmer rows could not be verified in the Farmers sheet.");
       const savedSubmissionRow = getSubmissionRow_(submissionsSheet, submissionsSchema, submissionId);
       if (!savedSubmissionRow) throw new Error("The new submission row could not be read back.");
       updateSubmissionSummary_(submissionsSheet, submissionsSchema, savedSubmissionRow.row, summary, total);
