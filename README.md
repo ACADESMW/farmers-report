@@ -22,7 +22,7 @@ The backend is connected to the Google Sheet configured as `SPREADSHEET_ID` in
 `Code.gs`. New records are written to these tabs:
 
 1. **Submissions** - one row per report with `Timestamp`, CBV details, summary,
-   `Submission ID`, and calculated `Number of Farmers`.
+   `Submission ID`, and a batch total for `Number of Farmers`.
 2. **Farmers** - one row per farmer with the reference workbook's A:K fields:
    `Submission Date`, `CBV Name`, farmer details, satisfaction, follow-up, and
    `Comments (Zowonjezera)`. The backend does not add or write `Submission ID` or
@@ -35,9 +35,11 @@ row. It does not edit, recalculate, or write to **Monthly CBV Summary**; that
 tab remains manually maintained. The hidden `_CBV_Highlight_List` tab is also
 left untouched.
 
-`Submission ID` is retained in `Submissions` and in the browser session. Farmer
-rows are associated by `CBV Name`, `District`, `T/A`, and `Group Name` where
-available. `Submission Date` and `Comments (Zowonjezera)` are written in the
+`Submission ID` is retained in `Submissions` and in the browser session. CBV
+details are used to find the existing submission, but the backend does not
+scan or verify existing farmer rows before appending a new batch. The reported
+`Number of Farmers` is only the running total of batches submitted to that
+submission. `Submission Date` and `Comments (Zowonjezera)` are written in the
 Farmers tab. Optional `Common Questions` and farmer `Group Name` cells remain
 empty when no optional text is supplied.
 
@@ -48,8 +50,8 @@ empty when no optional text is supplied.
 - On their next visit, the CBV section is pre-filled and **locked**, the farmer
   table is cleared, and the form is ready for a new batch of farmers.
 - Submitting again **appends the new farmer rows to the same report** in the
-  **Farmers** sheet and updates that submission's summary and calculated
-  `Number of Farmers`. No duplicate submission row is created.
+  **Farmers** sheet and updates that submission's summary and running batch
+  total. No duplicate submission row is created.
 - Use the **Start New Report** button to end the session and begin a fresh
   submission (this clears the browser storage for that CBV).
 

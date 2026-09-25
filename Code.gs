@@ -90,7 +90,7 @@ function doPost(e) {
       }
 
       const appended = appendFarmerRows_(farmersSheet, farmersSchema, payload.farmers, cbv, now);
-      const total = countFarmerRows_(farmersSheet, farmersSchema, cbv);
+      const total = getBookedFarmerTotal_(existing.values, submissionsSchema) + appended.length;
       updateSubmissionSummary_(submissionsSheet, submissionsSchema, existing.row, summary, total);
       return respond(true, "Farmers added to the existing report.", {
         submissionId: submissionId,
@@ -105,7 +105,7 @@ function doPost(e) {
 
     try {
       const appended = appendFarmerRows_(farmersSheet, farmersSchema, payload.farmers, cbv, now);
-      const total = countFarmerRows_(farmersSheet, farmersSchema, cbv);
+      const total = appended.length;
       const savedSubmissionRow = getSubmissionRow_(submissionsSheet, submissionsSchema, submissionId);
       if (!savedSubmissionRow) throw new Error("The new submission row could not be read back.");
       updateSubmissionSummary_(submissionsSheet, submissionsSchema, savedSubmissionRow.row, summary, total);
@@ -330,24 +330,9 @@ function sameCbv_(values, schema, cbv) {
     (!group || !requestedGroup || group === requestedGroup);
 }
 
-function sameFarmerCbv_(values, schema, cbv) {
-  const name = text_(valueAt_(values, schema.map, "cbvName")).toLowerCase();
-  const district = text_(valueAt_(values, schema.map, "district")).toLowerCase();
-  const ta = text_(valueAt_(values, schema.map, "ta")).toLowerCase();
-  const group = text_(valueAt_(values, schema.map, "groupName")).toLowerCase();
-  const requestedName = text_(cbv.name).toLowerCase();
-  const requestedDistrict = text_(cbv.district).toLowerCase();
-  const requestedTa = text_(cbv.ta).toLowerCase();
-  const requestedGroup = text_(cbv.group).toLowerCase();
-  return name !== "" && name === requestedName &&
-    district !== "" && district === requestedDistrict &&
-    (!ta || !requestedTa || ta === requestedTa) &&
-    (!group || !requestedGroup || group === requestedGroup);
-}
-
-function countFarmerRows_(sheet, schema, cbv) {
-  const rows = getRows_(sheet, schema);
-  return rows.filter((row) => sameFarmerCbv_(row.values, schema, cbv)).length;
+function getBookedFarmerTotal_(values, schema) {
+  const total = Number(valueAt_(values, schema.map, "numberOfFarmers"));
+  return Number.isInteger(total) && total >= 0 ? total : 0;
 }
 
 function createSubmissionId_() {
