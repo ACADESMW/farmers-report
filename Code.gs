@@ -1,4 +1,4 @@
-const SPREADSHEET_ID = "1AVbDiveQWOJM2t661euX6v-G6apieho5";
+const SPREADSHEET_ID = "1YNXMaR2qe0TXS3MINdD3ikkMS8r-GHcoFpmWgyZ4b34";
 
 const SUBMISSIONS_SHEET = "Submissions";
 const FARMERS_SHEET = "Farmers";
@@ -68,8 +68,8 @@ function doPost(e) {
     validatePayload_(payload);
 
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const submissionsSheet = getOrCreateSheet_(spreadsheet, SUBMISSIONS_SHEET);
-    const farmersSheet = getOrCreateSheet_(spreadsheet, FARMERS_SHEET);
+    const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
+    const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
     const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS, OPTIONAL_SUBMISSION_FIELDS);
     const farmersSchema = ensureSchema_(farmersSheet, FARMER_FIELDS, OPTIONAL_FARMER_FIELDS);
     const cbv = payload.cbv;
@@ -151,13 +151,36 @@ function validatePayload_(payload) {
   });
 }
 
-function getOrCreateSheet_(spreadsheet, name) {
-  return spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name);
+function getRequiredSheet_(spreadsheet, name) {
+  const sheet = spreadsheet.getSheetByName(name);
+  if (!sheet) throw new Error("Required sheet tab not found: " + name);
+  return sheet;
+}
+
+function getLastContentColumn_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) return 0;
+  const values = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (text_(values[i]) !== "") return i + 1;
+  }
+  return 0;
+}
+
+function getLastContentRow_(sheet, width) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const readWidth = Math.max(width, 1);
+  const values = sheet.getRange(2, 1, lastRow - 1, readWidth).getValues();
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i].some((value) => text_(value) !== "")) return i + 2;
+  }
+  return 0;
 }
 
 function ensureSchema_(sheet, requiredFields, optionalFields) {
   const allFields = requiredFields.concat(optionalFields || []);
-  const width = Math.max(sheet.getLastColumn(), 1);
+  const width = Math.max(getLastContentColumn_(sheet), 1);
   const firstRow = sheet.getRange(1, 1, 1, width).getValues()[0];
   const hasHeaders = firstRow.some((value) => text_(value) !== "");
 
@@ -168,7 +191,7 @@ function ensureSchema_(sheet, requiredFields, optionalFields) {
     const map = mapHeaders_(sheet, allFields);
     const missing = requiredFields.filter((field) => map[field.key] < 0);
     if (missing.length) {
-      const startColumn = Math.max(sheet.getLastColumn(), 1) + 1;
+      const startColumn = getLastContentColumn_(sheet) + 1;
       sheet.getRange(1, startColumn, 1, missing.length).setValues([missing.map((field) => field.header)]);
     }
   }
@@ -177,7 +200,7 @@ function ensureSchema_(sheet, requiredFields, optionalFields) {
 }
 
 function buildSchema_(sheet, fields) {
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const lastColumn = Math.max(getLastContentColumn_(sheet), 1);
   const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
   const map = {};
   const used = {};
@@ -199,7 +222,7 @@ function buildSchema_(sheet, fields) {
 }
 
 function mapHeaders_(sheet, fields) {
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const lastColumn = Math.max(getLastContentColumn_(sheet), 1);
   const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
   const map = {};
   const used = {};
@@ -241,7 +264,7 @@ function valueAt_(values, map, key) {
 }
 
 function getRows_(sheet, schema) {
-  const lastRow = sheet.getLastRow();
+  const lastRow = getLastContentRow_(sheet, schema.width);
   if (lastRow < 2) return [];
   return sheet.getRange(2, 1, lastRow - 1, schema.width).getValues().map((values, index) => ({
     row: index + 2,
@@ -314,7 +337,7 @@ function appendSubmission_(sheet, schema, submissionId, cbv, summary, now) {
   setRowValue_(values, schema.map, "commonQuestions", text_(summary.commonQuestions));
   setRowValue_(values, schema.map, "numberOfFarmers", 0);
   if (schema.map.submissionDate >= 0) setRowValue_(values, schema.map, "submissionDate", now);
-  sheet.getRange(sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
+  sheet.getRange(getLastContentRow_(sheet, schema.width) + 1, 1, 1, values.length).setValues([values]);
 }
 
 function appendFarmerRows_(sheet, schema, submissionId, startRowNo, farmers, cbv, now) {
@@ -338,7 +361,7 @@ function appendFarmerRows_(sheet, schema, submissionId, startRowNo, farmers, cbv
     if (schema.map.submissionDate >= 0) setRowValue_(values, schema.map, "submissionDate", now);
     rows.push(values);
   });
-  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, schema.width).setValues(rows);
+  if (rows.length) sheet.getRange(getLastContentRow_(sheet, schema.width) + 1, 1, rows.length, schema.width).setValues(rows);
   return rows;
 }
 

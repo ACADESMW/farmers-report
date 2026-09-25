@@ -26,9 +26,10 @@ The backend is connected to the Google Sheet configured as `SPREADSHEET_ID` in
    CBV name, farmer details, satisfaction, follow-up, and comments.
 
 The adapter matches the existing header names and appends any required missing
-columns at the end of the two data tabs. It does not edit, recalculate, or write
-to **Monthly CBV Summary**; that tab remains manually maintained. The hidden
-`_CBV_Highlight_List` tab is also left untouched.
+columns immediately after the last populated header column in the two data
+tabs. It ignores formatted blank ranges when finding the next row. It does not
+edit, recalculate, or write to **Monthly CBV Summary**; that tab remains
+manually maintained. The hidden `_CBV_Highlight_List` tab is also left untouched.
 
 All generated columns (`Submission ID`, `Timestamp`, `Row #`, and
 `Number of Farmers`) are written by the backend. `CBV Name` is copied into every
@@ -58,7 +59,7 @@ and `Comments` cells remain empty when no optional text is supplied.
 ### Part A - Google Sheet
 
 1. Open the project spreadsheet:
-   `https://docs.google.com/spreadsheets/d/1AVbDiveQWOJM2t661euX6v-G6apieho5/edit`
+   `https://docs.google.com/spreadsheets/d/1YNXMaR2qe0TXS3MINdD3ikkMS8r-GHcoFpmWgyZ4b34/edit`
 2. Confirm that it contains the `Submissions` and `Farmers` tabs. The
    `Monthly CBV Summary` tab is maintained manually by the project team.
 3. Share the spreadsheet with the Google account that owns the Apps Script

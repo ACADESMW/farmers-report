@@ -636,8 +636,20 @@ async function submitToAppsScript(payload) {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(payload),
   });
-  /* The Apps Script backend always returns JSON */
-  return response.json();
+  const responseText = await response.text();
+  let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch (error) {
+    if (responseText.indexOf("ServiceLogin") !== -1 || responseText.indexOf("Sign in") !== -1) {
+      throw new Error("The Apps Script endpoint requires Google sign-in. Redeploy it with Anyone access.");
+    }
+    throw new Error("The Apps Script endpoint returned an invalid response.");
+  }
+  if (!response.ok) {
+    throw new Error((result && result.error) || "The Apps Script request failed (HTTP " + response.status + ").");
+  }
+  return result;
 }
 
 /* ---------------------------------------------------------
