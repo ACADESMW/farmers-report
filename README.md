@@ -17,11 +17,24 @@ Google Sheet through a Google Apps Script Web App. Users never touch the Sheet.
 
 ## How the data is stored
 
-The script creates (or reuses) two sheets inside your spreadsheet:
+The backend is connected to the Google Sheet configured as `SPREADSHEET_ID` in
+`Code.gs`. New records are written to these tabs:
 
-1. **Submissions** - one row per form submission with the CBV and summary answers.
-2. **Farmers** - one row per farmer entered in the table, linked back to the
-   submission by a shared `Submission ID`.
+1. **Submissions** - one row per report with the submission ID, timestamp, CBV
+   details, summary, and calculated `Number of Farmers`.
+2. **Farmers** - one row per farmer with the shared submission ID, row number,
+   CBV name, farmer details, satisfaction, follow-up, and comments.
+
+The adapter matches the existing header names and appends any required missing
+columns at the end of the two data tabs. It does not edit, recalculate, or write
+to **Monthly CBV Summary**; that tab remains manually maintained. The hidden
+`_CBV_Highlight_List` tab is also left untouched.
+
+All generated columns (`Submission ID`, `Timestamp`, `Row #`, and
+`Number of Farmers`) are written by the backend. `CBV Name` is copied into every
+new farmer row from its parent CBV, so the farmer tab is linked by both
+`Submission ID` and CBV name. Optional `Common Questions`, farmer `Group Name`,
+and `Comments` cells remain empty when no optional text is supplied.
 
 ### CBV sessions (adding farmers over time)
 
@@ -30,8 +43,8 @@ The script creates (or reuses) two sheets inside your spreadsheet:
 - On their next visit, the CBV section is pre-filled and **locked**, the farmer
   table is cleared, and the form is ready for a new batch of farmers.
 - Submitting again **appends the new farmer rows under the same `Submission ID`**
-  in the **Farmers** sheet and updates that submission's "Farmers Reached" /
-  "Number of Farmers" numbers. No duplicate submission row is created.
+  in the **Farmers** sheet and updates that submission's summary and calculated
+  `Number of Farmers`. No duplicate submission row is created.
 - Use the **Start New Report** button to end the session and begin a fresh
   submission (this clears the browser storage for that CBV).
 
@@ -44,10 +57,14 @@ The script creates (or reuses) two sheets inside your spreadsheet:
 
 ### Part A - Google Sheet
 
-1. Create a new Google Spreadsheet (or reuse an existing one).
-2. Open it and copy the ID from the URL:
-   `https://docs.google.com/spreadsheets/d/THIS_IS_THE_ID/edit`
-3. Open `Code.gs` and paste that ID into the `SPREADSHEET_ID` constant at the top.
+1. Open the project spreadsheet:
+   `https://docs.google.com/spreadsheets/d/1AVbDiveQWOJM2t661euX6v-G6apieho5/edit`
+2. Confirm that it contains the `Submissions` and `Farmers` tabs. The
+   `Monthly CBV Summary` tab is maintained manually by the project team.
+3. Share the spreadsheet with the Google account that owns the Apps Script
+   project, or grant that account access through your organisation's sharing
+   policy.
+4. Keep the `SPREADSHEET_ID` value in `Code.gs` equal to the ID above.
 
 ### Part B - Apps Script backend
 
@@ -89,4 +106,7 @@ Open `index.html` in a browser and:
 - Enter a full farmer row, submit, then reload - the CBV section should be
   locked with the same Report ID and a fresh empty farmer table.
 - Submit again to confirm the new farmers are appended under the same ID.
+- In the Google Sheet, verify that every new `Submissions` and `Farmers` row
+  has its generated columns populated, including the farmer-row `CBV Name`.
+- Confirm that submitting does not change **Monthly CBV Summary**.
 - Use **Start New Report** to begin a fresh submission.

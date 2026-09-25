@@ -16,7 +16,7 @@
       fully filled farmer row before submitting.
    --------------------------------------------------------- */
 const CONFIG = {
-  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbyXBLPpTF-VTUPJuBzmHONq_R50Jef92sgPMrWrClZatj8szLnVlWdUuI6vzIA5ygCO/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
+  APPS_SCRIPT_URL: "https://script.google.com/a/macros/acadesmw.com/s/AKfycbyIjfsNzGYaefpV2G-kRcesyHF005FX_xapdejx9o200v1kvXglP4MyAcKiLR5oSW4H/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
   REQUIRE_FARMER_ROWS: true,
   AGE_MIN: 5,
   AGE_MAX: 120,
@@ -346,6 +346,7 @@ function validateFarmerRows() {
   }
 
   const errors = [];
+  let hasFarmerRow = false;
 
   rows.forEach((tr, i) => {
     const rowNum = i + 1;
@@ -361,12 +362,9 @@ function validateFarmerRows() {
       comments: tr.querySelector(".f-comments"),
     };
 
-    /* A fully empty row (other than comments) is simply skipped */
-    const coreFilled = ["name", "age", "gender", "district", "ta", "group", "satisfied", "follow"]
-      .some((k) => String(cellMap[k].value).trim() !== "");
-    if (!coreFilled) {
-      return; // empty row - ignore
-    }
+    const hasAnyValue = Object.values(cellMap).some((el) => String(el.value).trim() !== "");
+    if (!hasAnyValue) return;
+    hasFarmerRow = true;
 
     const rowErrors = [];
 
@@ -400,6 +398,11 @@ function validateFarmerRows() {
       errors.push(`Row ${rowNum}: ${rowErrors.join(", ")}`);
     }
   });
+
+  if (CONFIG.REQUIRE_FARMER_ROWS && !hasFarmerRow) {
+    elTableError.textContent = "Please fill in at least one farmer row. / Wongani mlimi mmodzi.";
+    return false;
+  }
 
   if (errors.length) {
     elTableError.textContent = errors.join(". ");
@@ -670,11 +673,17 @@ async function handleSubmit(event) {
 
     if (result && result.success) {
       const existing = loadSession();
-      const submissionId = existing && existing.submissionId ? existing.submissionId : (result.submissionId || "OK");
+      const submissionId = result.submissionId || (existing && existing.submissionId) || "OK";
       const submittedAt = new Date().toISOString();
 
       if (existing && existing.submissionId) {
-        showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) to report ${existing.submissionId}. The CBV details stay locked for the next batch.`);
+        saveSession({
+          submissionId,
+          submittedAt,
+          cbv: payload.cbv,
+          summary: payload.summary,
+        });
+        showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) to report ${submissionId}. The CBV details stay locked for the next batch.`);
       } else {
         saveSession({
           submissionId,
@@ -775,6 +784,9 @@ function applySession(session) {
     session.summary && session.summary.farmersReached != null
       ? String(session.summary.farmersReached)
       : "";
+  elForm.elements.commonQuestions.value = session.summary && session.summary.commonQuestions
+    ? session.summary.commonQuestions
+    : "";
 
   lockCbvFields(true);
 
