@@ -1,69 +1,53 @@
-/**
- * Farmers Report - Google Apps Script backend
- *
- * Receives the form payload (CBV + summary + farmers) as JSON and writes it
- * to a private Google Sheet.
- *
- * Two sheets are managed inside the spreadsheet:
- *   Submissions - one row per report (CBV + summary), keyed by Submission ID.
- *   Farmers     - one row per farmer, linked back to a report by Submission ID.
- *
- * Continuation: a CBV keeps ONE Submission ID for life. If a payload arrives
- * carrying an existing submissionId that belongs to the same CBV, or the CBV
- * can be matched to an existing report by identity (name + district + group),
- * only the new farmer rows are appended under that ID and the Submissions
- * row's summary numbers (Farmers Reached / Number of Farmers) are refreshed.
- * No duplicate Submissions row is created for the same CBV, so the ID stays
- * the same even when data is entered at different times, on different days,
- * or from a different device/browser.
- */
-
-const SPREADSHEET_ID = "1XtMJTwIgBbMLitbYrp2k9r-lUwVQ9YdSgWiNqwP0zbQ";
+const SPREADSHEET_ID = "1AVbDiveQWOJM2t661euX6v-G6apieho5";
 
 const SUBMISSIONS_SHEET = "Submissions";
 const FARMERS_SHEET = "Farmers";
 
-/* Column indexes (1-based) inside the Submissions sheet */
-const SUBMISSION_ID_COL = 1;
-const FARMERS_REACHED_COL = 9;
-const NUMBER_OF_FARMERS_COL = 11;
-
-const SUBMISSION_HEADERS = [
-  "Submission ID",
-  "Submitted At",
-  "CBV Name",
-  "CBV Age",
-  "CBV Gender",
-  "District",
-  "T/A",
-  "Group Name",
-  "Farmers Reached",
-  "Common Questions",
-  "Number of Farmers",
+const SUBMISSION_FIELDS = [
+  { key: "submissionId", header: "Submission ID", aliases: ["Submission ID"] },
+  { key: "timestamp", header: "Timestamp", aliases: ["Timestamp", "Submitted At"] },
+  { key: "name", header: "Name (Dzina Lanu)", aliases: ["Name (Dzina Lanu)", "CBV Name", "Name"] },
+  { key: "age", header: "Age (Zaka zanu)", aliases: ["Age (Zaka zanu)", "CBV Age", "Age"] },
+  { key: "gender", header: "Gender (Mamuna kapena Mkazi)", aliases: ["Gender (Mamuna kapena Mkazi)", "CBV Gender", "Gender"] },
+  { key: "district", header: "District (Boma)", aliases: ["District (Boma)", "District"] },
+  { key: "ta", header: "T/A", aliases: ["T/A", "TA"] },
+  { key: "group", header: "Group (Dzina la Gulu)", aliases: ["Group (Dzina la Gulu)", "Group Name", "Group"] },
+  { key: "farmersReached", header: "Farmers Reached (Mwafikira Alimi angati)", aliases: ["Farmers Reached (Mwafikira Alimi angati)", "Farmers Reached"] },
+  { key: "commonQuestions", header: "Common Questions (Mafunso)", aliases: ["Common Questions (Mafunso)", "Common Questions"] },
+  { key: "numberOfFarmers", header: "Number of Farmers", aliases: ["Number of Farmers"] },
 ];
 
-const FARMER_HEADERS = [
-  "Submission ID",
-  "Row #",
-  "Farmer Name",
-  "Age",
-  "Gender",
-  "District",
-  "T/A",
-  "Group Name",
-  "Satisfied",
-  "Follow Up",
-  "Comments",
+const FARMER_FIELDS = [
+  { key: "submissionId", header: "Submission ID", aliases: ["Submission ID"] },
+  { key: "rowNo", header: "Row #", aliases: ["Row #", "Row"] },
+  { key: "cbvName", header: "CBV Name", aliases: ["CBV Name"] },
+  { key: "farmerName", header: "Farmer Name (Dzina)", aliases: ["Farmer Name (Dzina)", "Farmer Name"] },
+  { key: "age", header: "Age (Zaka)", aliases: ["Age (Zaka)", "Age"] },
+  { key: "gender", header: "Gender (Mamuna/Mkazi)", aliases: ["Gender (Mamuna/Mkazi)", "Gender"] },
+  { key: "district", header: "District (Boma)", aliases: ["District (Boma)", "District"] },
+  { key: "ta", header: "T/A", aliases: ["T/A", "TA"] },
+  { key: "groupName", header: "Group Name", aliases: ["Group Name", "Group"] },
+  { key: "satisfied", header: "Satisfied? (Eya/Ayi)", aliases: ["Satisfied? (Eya/Ayi)", "Satisfied?", "Satisfied"] },
+  { key: "followUp", header: "Follow Up Visit (Eya/Ayi)", aliases: ["Follow Up Visit (Eya/Ayi)", "Follow Up", "Follow Up?"] },
+  { key: "comments", header: "Comments (Zowonjezera)", aliases: ["Comments (Zowonjezera)", "Comments"] },
 ];
 
-/* A uniform JSON response helper */
+const OPTIONAL_SUBMISSION_FIELDS = [
+  { key: "submissionDate", aliases: ["Submission Date"] },
+];
+
+const OPTIONAL_FARMER_FIELDS = [
+  { key: "submissionDate", aliases: ["Submission Date"] },
+];
+
 function respond(status, message, extra) {
-  const out = { success: status, message: message };
+  const output = { success: status, message: message };
+  if (!status) output.error = message;
   if (extra) {
-    for (const key in extra) out[key] = extra[key];
+    for (const key in extra) output[key] = extra[key];
   }
   return ContentService
-    .createTextOutput(JSON.stringify(out))
+    .createTextOutput(JSON.stringify(output))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -71,48 +55,46 @@ function doGet() {
   return HtmlService
     .createHtmlOutput(
       "<h1>Farmers Report API</h1>" +
-      "<p>This web app only accepts POST requests from the Farmers Report form.</p>"
+      "<p>This web app accepts farmer report submissions.</p>"
     )
     .setTitle("Farmers Report API");
 }
 
 function doPost(e) {
   try {
-    const payload = JSON.parse(e.postData.contents);
+    const contents = e && e.postData && e.postData.contents;
+    if (!contents) throw new Error("The request body is empty.");
+    const payload = JSON.parse(contents);
+    validatePayload_(payload);
 
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const subSheet = ss.getSheetByName(SUBMISSIONS_SHEET) || ss.insertSheet(SUBMISSIONS_SHEET);
-    const farmSheet = ss.getSheetByName(FARMERS_SHEET) || ss.insertSheet(FARMERS_SHEET);
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const submissionsSheet = getOrCreateSheet_(spreadsheet, SUBMISSIONS_SHEET);
+    const farmersSheet = getOrCreateSheet_(spreadsheet, FARMERS_SHEET);
+    const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS, OPTIONAL_SUBMISSION_FIELDS);
+    const farmersSchema = ensureSchema_(farmersSheet, FARMER_FIELDS, OPTIONAL_FARMER_FIELDS);
+    const cbv = payload.cbv;
+    const summary = payload.summary;
+    const now = new Date();
 
-    if (subSheet.getLastRow() === 0) subSheet.appendRow(SUBMISSION_HEADERS);
-    if (farmSheet.getLastRow() === 0) farmSheet.appendRow(FARMER_HEADERS);
-
-    const cbv = payload.cbv || {};
-    const summary = payload.summary || {};
-
-    /* The CBV keeps ONE Submission ID for life. Prefer the ID this browser
-       already knows, then fall back to matching the CBV by identity
-       (name + district + group) so the same person reuses the same ID even
-       when they submit from a different device, browser or on a later date. */
-    const requestedId = String(payload.submissionId || "").trim();
     let existing = null;
-
+    const requestedId = text_(payload.submissionId);
     if (requestedId) {
-      const byId = getSubmissionRow_(subSheet, requestedId);
-      /* Only trust a client-provided ID if it really belongs to this CBV. */
-      if (byId && sameCbv_(byId.values, cbv)) existing = byId;
+      existing = getSubmissionRow_(submissionsSheet, submissionsSchema, requestedId);
+      if (existing && !sameCbv_(existing.values, submissionsSchema, cbv)) existing = null;
     }
-    if (!existing) {
-      existing = getSubmissionByCbv_(subSheet, cbv);
-    }
+    if (!existing) existing = getSubmissionByCbv_(submissionsSheet, submissionsSchema, cbv);
 
-    /* ---------- Follow-up: append farmers under the existing report ---------- */
     if (existing) {
-      const submissionId = existing.values[0];
-      const startRowNo = countFarmerRows_(farmSheet, submissionId);
-      const appended = appendFarmerRows_(farmSheet, submissionId, startRowNo, payload.farmers || []);
-      const total = countFarmerRows_(farmSheet, submissionId);
-      updateSubmissionSummary_(subSheet, existing.row, summary, total);
+      let submissionId = text_(valueAt_(existing.values, submissionsSchema.map, "submissionId"));
+      if (!submissionId) {
+        submissionId = createSubmissionId_();
+        submissionsSheet.getRange(existing.row, submissionsSchema.map.submissionId + 1).setValue(submissionId);
+      }
+
+      const startRowNo = getNextFarmerRowNo_(farmersSheet, farmersSchema, submissionId);
+      const appended = appendFarmerRows_(farmersSheet, farmersSchema, submissionId, startRowNo, payload.farmers, cbv, now);
+      const total = countFarmerRows_(farmersSheet, farmersSchema, submissionId);
+      updateSubmissionSummary_(submissionsSheet, submissionsSchema, existing.row, summary, total);
       return respond(true, "Farmers added to the existing report.", {
         submissionId: submissionId,
         appended: appended.length,
@@ -120,116 +102,256 @@ function doPost(e) {
       });
     }
 
-    /* ---------- New submission ---------- */
-    const submissionId = "FR-" + Utilities.getUuid().slice(0, 8).toUpperCase();
-    const now = new Date();
-
-    subSheet.appendRow([
-      submissionId,
-      now,
-      cbv.name || "",
-      cbv.age != null ? cbv.age : "",
-      cbv.gender || "",
-      cbv.district || "",
-      cbv.ta || "",
-      cbv.group || "",
-      summary.farmersReached != null ? summary.farmersReached : "",
-      summary.commonQuestions || "",
-    ]);
-
-    const appended = appendFarmerRows_(farmSheet, submissionId, 0, payload.farmers || []);
-    const total = countFarmerRows_(farmSheet, submissionId);
-
-    const subRow = getSubmissionRow_(subSheet, submissionId);
-    if (subRow) updateSubmissionSummary_(subSheet, subRow.row, summary, total);
+    const submissionId = createSubmissionId_();
+    appendSubmission_(submissionsSheet, submissionsSchema, submissionId, cbv, summary, now);
+    const appended = appendFarmerRows_(farmersSheet, farmersSchema, submissionId, 0, payload.farmers, cbv, now);
+    const total = countFarmerRows_(farmersSheet, farmersSchema, submissionId);
+    const submissionRow = getSubmissionRow_(submissionsSheet, submissionsSchema, submissionId);
+    if (submissionRow) updateSubmissionSummary_(submissionsSheet, submissionsSchema, submissionRow.row, summary, total);
 
     return respond(true, "Report submitted successfully.", {
       submissionId: submissionId,
       appended: appended.length,
       totalFarmers: total,
     });
-  } catch (err) {
-    return respond(false, "Server error: " + err.message);
+  } catch (error) {
+    return respond(false, "Server error: " + error.message);
   }
 }
 
-/* Find the row (2..lastRow) of a submission by its ID. Returns { row, values } or null. */
-function getSubmissionRow_(subSheet, requestedId) {
-  const lastRow = subSheet.getLastRow();
-  if (lastRow < 2) return null;
-  const data = subSheet.getRange(2, 1, lastRow - 1, SUBMISSION_HEADERS.length).getValues();
-  for (let i = 0; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(requestedId).trim()) {
-      return { row: i + 2, values: data[i] };
+function validatePayload_(payload) {
+  if (!payload || typeof payload !== "object") throw new Error("Invalid submission payload.");
+
+  const cbv = payload.cbv || {};
+  if (!text_(cbv.name) || text_(cbv.name).length < 2) throw new Error("CBV name is required.");
+  const cbvAge = Number(cbv.age);
+  if (!Number.isInteger(cbvAge) || cbvAge < 5 || cbvAge > 120) throw new Error("CBV age must be a whole number between 5 and 120.");
+  if (!isAllowedValue_(cbv.gender, ["Mamuna", "Mkazi"])) throw new Error("CBV gender is invalid.");
+  if (!text_(cbv.district)) throw new Error("CBV district is required.");
+  if (!text_(cbv.ta) || text_(cbv.ta).length < 2) throw new Error("CBV T/A is required.");
+  if (!text_(cbv.group) || text_(cbv.group).length < 2) throw new Error("CBV group is required.");
+
+  const summary = payload.summary || {};
+  const reached = Number(summary.farmersReached);
+  if (!Number.isInteger(reached) || reached < 0 || reached > 10000) throw new Error("Farmers reached is invalid.");
+  if (summary.commonQuestions != null && String(summary.commonQuestions).length > 5000) throw new Error("Common questions is too long.");
+
+  const farmers = Array.isArray(payload.farmers) ? payload.farmers : [];
+  if (!farmers.length) throw new Error("At least one farmer is required.");
+  farmers.forEach((farmer, index) => {
+    if (!farmer || typeof farmer !== "object") throw new Error("Farmer row " + (index + 1) + " is invalid.");
+    if (!text_(farmer.name)) throw new Error("Farmer name is required on row " + (index + 1) + ".");
+    const age = Number(farmer.age);
+    if (!Number.isInteger(age) || age < 1 || age > 120) throw new Error("Farmer age is invalid on row " + (index + 1) + ".");
+    if (!isAllowedValue_(farmer.gender, ["Mamuna", "Mkazi"])) throw new Error("Farmer gender is invalid on row " + (index + 1) + ".");
+    if (!text_(farmer.district)) throw new Error("Farmer district is required on row " + (index + 1) + ".");
+    if (!text_(farmer.ta) || text_(farmer.ta).length < 2) throw new Error("Farmer T/A is required on row " + (index + 1) + ".");
+    if (!isAllowedValue_(farmer.satisfied, ["Eya", "Ayi"])) throw new Error("Satisfied value is invalid on row " + (index + 1) + ".");
+    if (!isAllowedValue_(farmer.followUp, ["Eya", "Ayi"])) throw new Error("Follow-up value is invalid on row " + (index + 1) + ".");
+  });
+}
+
+function getOrCreateSheet_(spreadsheet, name) {
+  return spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name);
+}
+
+function ensureSchema_(sheet, requiredFields, optionalFields) {
+  const allFields = requiredFields.concat(optionalFields || []);
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const firstRow = sheet.getRange(1, 1, 1, width).getValues()[0];
+  const hasHeaders = firstRow.some((value) => text_(value) !== "");
+
+  if (!hasHeaders) {
+    const headers = requiredFields.map((field) => field.header);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  } else {
+    const map = mapHeaders_(sheet, allFields);
+    const missing = requiredFields.filter((field) => map[field.key] < 0);
+    if (missing.length) {
+      const startColumn = Math.max(sheet.getLastColumn(), 1) + 1;
+      sheet.getRange(1, startColumn, 1, missing.length).setValues([missing.map((field) => field.header)]);
     }
+  }
+
+  return buildSchema_(sheet, allFields);
+}
+
+function buildSchema_(sheet, fields) {
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const map = {};
+  const used = {};
+
+  fields.forEach((field) => {
+    const aliases = (field.aliases || [field.header]).map(normalizeHeader_);
+    map[field.key] = -1;
+    for (let i = 0; i < headers.length; i++) {
+      if (used[i]) continue;
+      if (aliases.indexOf(normalizeHeader_(headers[i])) !== -1) {
+        map[field.key] = i;
+        used[i] = true;
+        break;
+      }
+    }
+  });
+
+  return { map: map, width: lastColumn };
+}
+
+function mapHeaders_(sheet, fields) {
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const map = {};
+  const used = {};
+
+  fields.forEach((field) => {
+    const aliases = (field.aliases || [field.header]).map(normalizeHeader_);
+    map[field.key] = -1;
+    for (let i = 0; i < headers.length; i++) {
+      if (used[i]) continue;
+      if (aliases.indexOf(normalizeHeader_(headers[i])) !== -1) {
+        map[field.key] = i;
+        used[i] = true;
+        break;
+      }
+    }
+  });
+
+  return map;
+}
+
+function normalizeHeader_(value) {
+  return String(value == null ? "" : value)
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function text_(value) {
+  return String(value == null ? "" : value).trim();
+}
+
+function isAllowedValue_(value, allowed) {
+  return allowed.indexOf(text_(value)) !== -1;
+}
+
+function valueAt_(values, map, key) {
+  const index = map[key];
+  return index == null || index < 0 ? "" : values[index];
+}
+
+function getRows_(sheet, schema) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, schema.width).getValues().map((values, index) => ({
+    row: index + 2,
+    values: values,
+  }));
+}
+
+function getSubmissionRow_(sheet, schema, requestedId) {
+  const target = text_(requestedId);
+  if (!target) return null;
+  const rows = getRows_(sheet, schema);
+  for (let i = 0; i < rows.length; i++) {
+    if (text_(valueAt_(rows[i].values, schema.map, "submissionId")) === target) return rows[i];
   }
   return null;
 }
 
-/* Compare a Submissions row to the submitted CBV details (identity check). */
-function sameCbv_(rowValues, cbv) {
-  return (
-    String(rowValues[2]).trim() === String(cbv.name || "").trim() &&
-    String(rowValues[5]).trim() === String(cbv.district || "").trim() &&
-    String(rowValues[7]).trim() === String(cbv.group || "").trim()
-  );
-}
-
-/* Find an existing submission for the same CBV (name + district + group). */
-function getSubmissionByCbv_(subSheet, cbv) {
-  const lastRow = subSheet.getLastRow();
-  if (lastRow < 2) return null;
-  const data = subSheet.getRange(2, 1, lastRow - 1, SUBMISSION_HEADERS.length).getValues();
-  for (let i = 0; i < data.length; i++) {
-    if (sameCbv_(data[i], cbv)) {
-      return { row: i + 2, values: data[i] };
-    }
+function getSubmissionByCbv_(sheet, schema, cbv) {
+  const rows = getRows_(sheet, schema);
+  for (let i = 0; i < rows.length; i++) {
+    if (sameCbv_(rows[i].values, schema, cbv)) return rows[i];
   }
   return null;
 }
 
-/* Count how many farmer rows already exist for a submission. */
-function countFarmerRows_(farmSheet, requestedId) {
-  const lastRow = farmSheet.getLastRow();
-  if (lastRow < 2) return 0;
-  const data = farmSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  let count = 0;
-  for (let i = 0; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(requestedId).trim()) count++;
-  }
-  return count;
+function sameCbv_(values, schema, cbv) {
+  const name = text_(valueAt_(values, schema.map, "name")).toLowerCase();
+  const district = text_(valueAt_(values, schema.map, "district")).toLowerCase();
+  const group = text_(valueAt_(values, schema.map, "group")).toLowerCase();
+  return name !== "" && name === text_(cbv.name).toLowerCase() &&
+    district !== "" && district === text_(cbv.district).toLowerCase() &&
+    group !== "" && group === text_(cbv.group).toLowerCase();
 }
 
-/* Append farmer rows for a submission, continuing the Row # sequence. Returns the rows. */
-function appendFarmerRows_(farmSheet, requestedId, startRowNo, farmers) {
+function countFarmerRows_(sheet, schema, requestedId) {
+  const target = text_(requestedId);
+  if (!target) return 0;
+  const rows = getRows_(sheet, schema);
+  return rows.filter((row) => text_(valueAt_(row.values, schema.map, "submissionId")) === target).length;
+}
+
+function getNextFarmerRowNo_(sheet, schema, requestedId) {
+  const target = text_(requestedId);
+  if (!target) return 0;
+  const rows = getRows_(sheet, schema);
+  let maxRowNo = 0;
+  rows.forEach((row) => {
+    if (text_(valueAt_(row.values, schema.map, "submissionId")) !== target) return;
+    const rowNo = Number(valueAt_(row.values, schema.map, "rowNo"));
+    if (Number.isInteger(rowNo) && rowNo > maxRowNo) maxRowNo = rowNo;
+  });
+  return maxRowNo;
+}
+
+function createSubmissionId_() {
+  return "FR-" + Utilities.getUuid().slice(0, 8).toUpperCase();
+}
+
+function appendSubmission_(sheet, schema, submissionId, cbv, summary, now) {
+  const values = new Array(schema.width).fill("");
+  setRowValue_(values, schema.map, "submissionId", submissionId);
+  setRowValue_(values, schema.map, "timestamp", now);
+  setRowValue_(values, schema.map, "name", text_(cbv.name));
+  setRowValue_(values, schema.map, "age", Number(cbv.age));
+  setRowValue_(values, schema.map, "gender", text_(cbv.gender));
+  setRowValue_(values, schema.map, "district", text_(cbv.district));
+  setRowValue_(values, schema.map, "ta", text_(cbv.ta));
+  setRowValue_(values, schema.map, "group", text_(cbv.group));
+  setRowValue_(values, schema.map, "farmersReached", Number(summary.farmersReached));
+  setRowValue_(values, schema.map, "commonQuestions", text_(summary.commonQuestions));
+  setRowValue_(values, schema.map, "numberOfFarmers", 0);
+  if (schema.map.submissionDate >= 0) setRowValue_(values, schema.map, "submissionDate", now);
+  sheet.getRange(sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
+}
+
+function appendFarmerRows_(sheet, schema, submissionId, startRowNo, farmers, cbv, now) {
   const rows = [];
   let rowNo = startRowNo;
-  farmers.forEach((f) => {
+  (farmers || []).forEach((farmer) => {
     rowNo++;
-    rows.push([
-      requestedId,
-      rowNo,
-      f.name || "",
-      f.age != null ? f.age : "",
-      f.gender || "",
-      f.district || "",
-      f.ta || "",
-      f.groupName || "",
-      f.satisfied || "",
-      f.followUp || "",
-      f.comments || "",
-    ]);
+    const values = new Array(schema.width).fill("");
+    setRowValue_(values, schema.map, "submissionId", submissionId);
+    setRowValue_(values, schema.map, "rowNo", rowNo);
+    setRowValue_(values, schema.map, "cbvName", text_(cbv.name));
+    setRowValue_(values, schema.map, "farmerName", text_(farmer.name));
+    setRowValue_(values, schema.map, "age", Number(farmer.age));
+    setRowValue_(values, schema.map, "gender", text_(farmer.gender));
+    setRowValue_(values, schema.map, "district", text_(farmer.district));
+    setRowValue_(values, schema.map, "ta", text_(farmer.ta));
+    setRowValue_(values, schema.map, "groupName", text_(farmer.groupName));
+    setRowValue_(values, schema.map, "satisfied", text_(farmer.satisfied));
+    setRowValue_(values, schema.map, "followUp", text_(farmer.followUp));
+    setRowValue_(values, schema.map, "comments", text_(farmer.comments));
+    if (schema.map.submissionDate >= 0) setRowValue_(values, schema.map, "submissionDate", now);
+    rows.push(values);
   });
-  if (rows.length) {
-    farmSheet.getRange(farmSheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
-  }
+  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, schema.width).setValues(rows);
   return rows;
 }
 
-/* Refresh the "Farmers Reached" and "Number of Farmers" cells on a Submissions row. */
-function updateSubmissionSummary_(subSheet, rowNumber, summary, totalFarmers) {
-  if (summary.farmersReached != null) {
-    subSheet.getRange(rowNumber, FARMERS_REACHED_COL).setValue(summary.farmersReached);
-  }
-  subSheet.getRange(rowNumber, NUMBER_OF_FARMERS_COL).setValue(totalFarmers);
+function setRowValue_(values, map, key, value) {
+  if (map[key] == null || map[key] < 0) return;
+  values[map[key]] = value;
+}
+
+function updateSubmissionSummary_(sheet, schema, rowNumber, summary, totalFarmers) {
+  const farmersReachedColumn = schema.map.farmersReached;
+  const commonQuestionsColumn = schema.map.commonQuestions;
+  const numberOfFarmersColumn = schema.map.numberOfFarmers;
+  if (farmersReachedColumn >= 0) sheet.getRange(rowNumber, farmersReachedColumn + 1).setValue(Number(summary.farmersReached));
+  if (commonQuestionsColumn >= 0) sheet.getRange(rowNumber, commonQuestionsColumn + 1).setValue(text_(summary.commonQuestions));
+  if (numberOfFarmersColumn >= 0) sheet.getRange(rowNumber, numberOfFarmersColumn + 1).setValue(totalFarmers);
 }
