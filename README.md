@@ -12,6 +12,7 @@ Google Sheet through a Google Apps Script Web App. Users never touch the Sheet.
 | `style.css` | Professional styling (green/agricultural theme) |
 | `script.js` | Farmer table logic, client-side validation, submission, session handling |
 | `Code.gs` | Google Apps Script backend that writes to the Sheet |
+| `CBV-Farmers-Database  (1).xlsx` | Reference workbook schema for the Sheet tabs |
 | `appsscript.json` | Apps Script manifest (timezone, runtime, web app) |
 | `ACADES-logo.png` | Logo shown in the page header |
 
@@ -20,22 +21,25 @@ Google Sheet through a Google Apps Script Web App. Users never touch the Sheet.
 The backend is connected to the Google Sheet configured as `SPREADSHEET_ID` in
 `Code.gs`. New records are written to these tabs:
 
-1. **Submissions** - one row per report with the submission ID, timestamp, CBV
-   details, summary, and calculated `Number of Farmers`.
-2. **Farmers** - one row per farmer with the shared submission ID, row number,
-   CBV name, farmer details, satisfaction, follow-up, and comments.
+1. **Submissions** - one row per report with `Timestamp`, CBV details, summary,
+   `Submission ID`, and calculated `Number of Farmers`.
+2. **Farmers** - one row per farmer with the reference workbook's A:K fields:
+   `Submission Date`, `CBV Name`, farmer details, satisfaction, follow-up, and
+   `Comments (Zowonjezera)`. The backend does not add or write `Submission ID` or
+   `Row #` to this tab.
 
-The adapter matches the existing header names and appends any required missing
-columns immediately after the last populated header column in the two data
-tabs. It ignores formatted blank ranges when finding the next row. It does not
-edit, recalculate, or write to **Monthly CBV Summary**; that tab remains
-manually maintained. The hidden `_CBV_Highlight_List` tab is also left untouched.
+The adapter matches the existing header names and appends the two missing
+backend columns (`Submission ID` and `Number of Farmers`) to `Submissions` after
+its existing A:J fields. It ignores formatted blank ranges when finding the next
+row. It does not edit, recalculate, or write to **Monthly CBV Summary**; that
+tab remains manually maintained. The hidden `_CBV_Highlight_List` tab is also
+left untouched.
 
-All generated columns (`Submission ID`, `Timestamp`, `Row #`, and
-`Number of Farmers`) are written by the backend. `CBV Name` is copied into every
-new farmer row from its parent CBV, so the farmer tab is linked by both
-`Submission ID` and CBV name. Optional `Common Questions`, farmer `Group Name`,
-and `Comments` cells remain empty when no optional text is supplied.
+`Submission ID` is retained in `Submissions` and in the browser session. Farmer
+rows are associated by `CBV Name`, `District`, `T/A`, and `Group Name` where
+available. `Submission Date` and `Comments (Zowonjezera)` are written in the
+Farmers tab. Optional `Common Questions` and farmer `Group Name` cells remain
+empty when no optional text is supplied.
 
 ### CBV sessions (adding farmers over time)
 
@@ -43,14 +47,14 @@ and `Comments` cells remain empty when no optional text is supplied.
   `Submission ID`** in `localStorage` (a "session").
 - On their next visit, the CBV section is pre-filled and **locked**, the farmer
   table is cleared, and the form is ready for a new batch of farmers.
-- Submitting again **appends the new farmer rows under the same `Submission ID`**
-  in the **Farmers** sheet and updates that submission's summary and calculated
+- Submitting again **appends the new farmer rows to the same report** in the
+  **Farmers** sheet and updates that submission's summary and calculated
   `Number of Farmers`. No duplicate submission row is created.
 - Use the **Start New Report** button to end the session and begin a fresh
   submission (this clears the browser storage for that CBV).
 
-> Session storage lives in the CBV's own browser. Clearing the browser data
-> (or using a different device) starts a new session and a new Submission ID.
+> If a browser does not have the session, the backend tries to match the
+> submission by CBV details before creating a new one.
 
 ---
 
@@ -60,8 +64,9 @@ and `Comments` cells remain empty when no optional text is supplied.
 
 1. Open the project spreadsheet:
    `https://docs.google.com/spreadsheets/d/1YNXMaR2qe0TXS3MINdD3ikkMS8r-GHcoFpmWgyZ4b34/edit`
-2. Confirm that it contains the `Submissions` and `Farmers` tabs. The
-   `Monthly CBV Summary` tab is maintained manually by the project team.
+2. Confirm that it contains the `Submissions` and `Farmers` tabs, with the
+   expected column headings in row 1 of each data tab. The `Monthly CBV Summary`
+   tab is maintained manually by the project team.
 3. Share the spreadsheet with the Google account that owns the Apps Script
    project, or grant that account access through your organisation's sharing
    policy.
@@ -106,8 +111,10 @@ Open `index.html` in a browser and:
 - Submit with empty fields to check the validation messages.
 - Enter a full farmer row, submit, then reload - the CBV section should be
   locked with the same Report ID and a fresh empty farmer table.
-- Submit again to confirm the new farmers are appended under the same ID.
-- In the Google Sheet, verify that every new `Submissions` and `Farmers` row
-  has its generated columns populated, including the farmer-row `CBV Name`.
+- Submit again to confirm the new farmers are appended to the same report.
+- In the Google Sheet, verify that `Submissions` has `Submission ID` and
+  `Number of Farmers` after the reference A:J columns, and that `Farmers` has
+  the reference A:K columns with `Submission Date` and comments populated.
+- Confirm that `Farmers` does not gain `Submission ID` or `Row #` columns.
 - Confirm that submitting does not change **Monthly CBV Summary**.
 - Use **Start New Report** to begin a fresh submission.
