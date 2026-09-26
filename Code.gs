@@ -1,4 +1,4 @@
-const SPREADSHEET_ID = "1AVbDiveQWOJM2t661euX6v-G6apieho5";
+const SPREADSHEET_ID = "1YNXMaR2qe0TXS3MINdD3ikkMS8r-GHcoFpmWgyZ4b34";
 
 const SUBMISSIONS_SHEET = "Submissions";
 const FARMERS_SHEET = "Farmers";
@@ -18,8 +18,6 @@ const SUBMISSION_FIELDS = [
 ];
 
 const FARMER_FIELDS = [
-  { key: "submissionId", header: "Submission ID", aliases: ["Submission ID"] },
-  { key: "rowNo", header: "Row #", aliases: ["Row #", "Row"] },
   { key: "cbvName", header: "CBV Name", aliases: ["CBV Name"] },
   { key: "farmerName", header: "Farmer Name (Dzina)", aliases: ["Farmer Name (Dzina)", "Farmer Name"] },
   { key: "age", header: "Age (Zaka)", aliases: ["Age (Zaka)", "Age"] },
@@ -68,8 +66,8 @@ function doPost(e) {
     validatePayload_(payload);
 
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const submissionsSheet = getOrCreateSheet_(spreadsheet, SUBMISSIONS_SHEET);
-    const farmersSheet = getOrCreateSheet_(spreadsheet, FARMERS_SHEET);
+    const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
+    const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
     const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS, OPTIONAL_SUBMISSION_FIELDS);
     const farmersSchema = ensureSchema_(farmersSheet, FARMER_FIELDS, OPTIONAL_FARMER_FIELDS);
     const cbv = payload.cbv;
@@ -91,9 +89,8 @@ function doPost(e) {
         submissionsSheet.getRange(existing.row, submissionsSchema.map.submissionId + 1).setValue(submissionId);
       }
 
-      const startRowNo = getNextFarmerRowNo_(farmersSheet, farmersSchema, submissionId);
-      const appended = appendFarmerRows_(farmersSheet, farmersSchema, submissionId, startRowNo, payload.farmers, cbv, now);
-      const total = countFarmerRows_(farmersSheet, farmersSchema, submissionId);
+      const appended = appendFarmerRows_(farmersSheet, farmersSchema, payload.farmers, cbv, now);
+      const total = getBookedFarmerTotal_(existing.values, submissionsSchema) + appended.length;
       updateSubmissionSummary_(submissionsSheet, submissionsSchema, existing.row, summary, total);
       return respond(true, "Farmers added to the existing report.", {
         submissionId: submissionId,
@@ -103,17 +100,32 @@ function doPost(e) {
     }
 
     const submissionId = createSubmissionId_();
-    appendSubmission_(submissionsSheet, submissionsSchema, submissionId, cbv, summary, now);
-    const appended = appendFarmerRows_(farmersSheet, farmersSchema, submissionId, 0, payload.farmers, cbv, now);
-    const total = countFarmerRows_(farmersSheet, farmersSchema, submissionId);
-    const submissionRow = getSubmissionRow_(submissionsSheet, submissionsSchema, submissionId);
-    if (submissionRow) updateSubmissionSummary_(submissionsSheet, submissionsSchema, submissionRow.row, summary, total);
+    const submissionRow = appendSubmission_(submissionsSheet, submissionsSchema, submissionId, cbv, summary, now);
+    const farmerStartRow = nextDataRow_(farmersSheet, farmersSchema.width);
 
-    return respond(true, "Report submitted successfully.", {
-      submissionId: submissionId,
-      appended: appended.length,
-      totalFarmers: total,
-    });
+    try {
+      const appended = appendFarmerRows_(farmersSheet, farmersSchema, payload.farmers, cbv, now);
+      const total = appended.length;
+      const savedSubmissionRow = getSubmissionRow_(submissionsSheet, submissionsSchema, submissionId);
+      if (!savedSubmissionRow) throw new Error("The new submission row could not be read back.");
+      updateSubmissionSummary_(submissionsSheet, submissionsSchema, savedSubmissionRow.row, summary, total);
+
+      return respond(true, "Report submitted successfully.", {
+        submissionId: submissionId,
+        appended: appended.length,
+        totalFarmers: total,
+      });
+    } catch (error) {
+      try {
+        farmersSheet.getRange(farmerStartRow, 1, payload.farmers.length, farmersSchema.width).clearContent();
+      } catch (ignored) {
+      }
+      try {
+        submissionsSheet.getRange(submissionRow, 1, 1, submissionsSchema.width).clearContent();
+      } catch (ignored) {
+      }
+      throw new Error("Farmers sheet write failed: " + error.message);
+    }
   } catch (error) {
     return respond(false, "Server error: " + error.message);
   }
@@ -151,24 +163,54 @@ function validatePayload_(payload) {
   });
 }
 
-function getOrCreateSheet_(spreadsheet, name) {
-  return spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name);
+function getRequiredSheet_(spreadsheet, name) {
+  const sheet = spreadsheet.getSheetByName(name);
+  if (!sheet) throw new Error("Required sheet tab not found: " + name);
+  return sheet;
+}
+
+function getLastContentColumn_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) return 0;
+  const values = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (text_(values[i]) !== "") return i + 1;
+  }
+  return 0;
+}
+
+function getLastContentRow_(sheet, width) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const readWidth = Math.max(width, 1);
+  const values = sheet.getRange(2, 1, lastRow - 1, readWidth).getValues();
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i].some((value) => text_(value) !== "")) return i + 2;
+  }
+  return 0;
+}
+
+function nextDataRow_(sheet, width) {
+  return Math.max(getLastContentRow_(sheet, width), 1) + 1;
 }
 
 function ensureSchema_(sheet, requiredFields, optionalFields) {
   const allFields = requiredFields.concat(optionalFields || []);
-  const width = Math.max(sheet.getLastColumn(), 1);
+  const width = Math.max(getLastContentColumn_(sheet), 1);
   const firstRow = sheet.getRange(1, 1, 1, width).getValues()[0];
-  const hasHeaders = firstRow.some((value) => text_(value) !== "");
+  const hasValues = firstRow.some((value) => text_(value) !== "");
+  const hasHeaders = firstRow.some((value) => isKnownHeader_(value, allFields));
 
-  if (!hasHeaders) {
+  if (!hasValues) {
     const headers = requiredFields.map((field) => field.header);
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  } else if (!hasHeaders) {
+    throw new Error("The " + sheet.getName() + " header row is invalid. Restore its column headings before submitting.");
   } else {
     const map = mapHeaders_(sheet, allFields);
     const missing = requiredFields.filter((field) => map[field.key] < 0);
     if (missing.length) {
-      const startColumn = Math.max(sheet.getLastColumn(), 1) + 1;
+      const startColumn = getLastContentColumn_(sheet) + 1;
       sheet.getRange(1, startColumn, 1, missing.length).setValues([missing.map((field) => field.header)]);
     }
   }
@@ -177,7 +219,7 @@ function ensureSchema_(sheet, requiredFields, optionalFields) {
 }
 
 function buildSchema_(sheet, fields) {
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const lastColumn = Math.max(getLastContentColumn_(sheet), 1);
   const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
   const map = {};
   const used = {};
@@ -199,7 +241,7 @@ function buildSchema_(sheet, fields) {
 }
 
 function mapHeaders_(sheet, fields) {
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const lastColumn = Math.max(getLastContentColumn_(sheet), 1);
   const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
   const map = {};
   const used = {};
@@ -227,6 +269,12 @@ function normalizeHeader_(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function isKnownHeader_(value, fields) {
+  const normalized = normalizeHeader_(value);
+  if (!normalized) return false;
+  return fields.some((field) => (field.aliases || [field.header]).some((alias) => normalizeHeader_(alias) === normalized));
+}
+
 function text_(value) {
   return String(value == null ? "" : value).trim();
 }
@@ -241,7 +289,7 @@ function valueAt_(values, map, key) {
 }
 
 function getRows_(sheet, schema) {
-  const lastRow = sheet.getLastRow();
+  const lastRow = getLastContentRow_(sheet, schema.width);
   if (lastRow < 2) return [];
   return sheet.getRange(2, 1, lastRow - 1, schema.width).getValues().map((values, index) => ({
     row: index + 2,
@@ -270,30 +318,21 @@ function getSubmissionByCbv_(sheet, schema, cbv) {
 function sameCbv_(values, schema, cbv) {
   const name = text_(valueAt_(values, schema.map, "name")).toLowerCase();
   const district = text_(valueAt_(values, schema.map, "district")).toLowerCase();
+  const ta = text_(valueAt_(values, schema.map, "ta")).toLowerCase();
   const group = text_(valueAt_(values, schema.map, "group")).toLowerCase();
-  return name !== "" && name === text_(cbv.name).toLowerCase() &&
-    district !== "" && district === text_(cbv.district).toLowerCase() &&
-    group !== "" && group === text_(cbv.group).toLowerCase();
+  const requestedName = text_(cbv.name).toLowerCase();
+  const requestedDistrict = text_(cbv.district).toLowerCase();
+  const requestedTa = text_(cbv.ta).toLowerCase();
+  const requestedGroup = text_(cbv.group).toLowerCase();
+  return name !== "" && name === requestedName &&
+    district !== "" && district === requestedDistrict &&
+    (!ta || !requestedTa || ta === requestedTa) &&
+    (!group || !requestedGroup || group === requestedGroup);
 }
 
-function countFarmerRows_(sheet, schema, requestedId) {
-  const target = text_(requestedId);
-  if (!target) return 0;
-  const rows = getRows_(sheet, schema);
-  return rows.filter((row) => text_(valueAt_(row.values, schema.map, "submissionId")) === target).length;
-}
-
-function getNextFarmerRowNo_(sheet, schema, requestedId) {
-  const target = text_(requestedId);
-  if (!target) return 0;
-  const rows = getRows_(sheet, schema);
-  let maxRowNo = 0;
-  rows.forEach((row) => {
-    if (text_(valueAt_(row.values, schema.map, "submissionId")) !== target) return;
-    const rowNo = Number(valueAt_(row.values, schema.map, "rowNo"));
-    if (Number.isInteger(rowNo) && rowNo > maxRowNo) maxRowNo = rowNo;
-  });
-  return maxRowNo;
+function getBookedFarmerTotal_(values, schema) {
+  const total = Number(valueAt_(values, schema.map, "numberOfFarmers"));
+  return Number.isInteger(total) && total >= 0 ? total : 0;
 }
 
 function createSubmissionId_() {
@@ -314,17 +353,15 @@ function appendSubmission_(sheet, schema, submissionId, cbv, summary, now) {
   setRowValue_(values, schema.map, "commonQuestions", text_(summary.commonQuestions));
   setRowValue_(values, schema.map, "numberOfFarmers", 0);
   if (schema.map.submissionDate >= 0) setRowValue_(values, schema.map, "submissionDate", now);
-  sheet.getRange(sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
+  const rowNumber = nextDataRow_(sheet, schema.width);
+  sheet.getRange(rowNumber, 1, 1, values.length).setValues([values]);
+  return rowNumber;
 }
 
-function appendFarmerRows_(sheet, schema, submissionId, startRowNo, farmers, cbv, now) {
+function appendFarmerRows_(sheet, schema, farmers, cbv, now) {
   const rows = [];
-  let rowNo = startRowNo;
   (farmers || []).forEach((farmer) => {
-    rowNo++;
     const values = new Array(schema.width).fill("");
-    setRowValue_(values, schema.map, "submissionId", submissionId);
-    setRowValue_(values, schema.map, "rowNo", rowNo);
     setRowValue_(values, schema.map, "cbvName", text_(cbv.name));
     setRowValue_(values, schema.map, "farmerName", text_(farmer.name));
     setRowValue_(values, schema.map, "age", Number(farmer.age));
@@ -338,7 +375,7 @@ function appendFarmerRows_(sheet, schema, submissionId, startRowNo, farmers, cbv
     if (schema.map.submissionDate >= 0) setRowValue_(values, schema.map, "submissionDate", now);
     rows.push(values);
   });
-  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, schema.width).setValues(rows);
+  if (rows.length) sheet.getRange(nextDataRow_(sheet, schema.width), 1, rows.length, schema.width).setValues(rows);
   return rows;
 }
 

@@ -16,7 +16,7 @@
       fully filled farmer row before submitting.
    --------------------------------------------------------- */
 const CONFIG = {
-  APPS_SCRIPT_URL: "https://script.google.com/a/macros/acadesmw.com/s/AKfycbyIjfsNzGYaefpV2G-kRcesyHF005FX_xapdejx9o200v1kvXglP4MyAcKiLR5oSW4H/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycby-0VKsu5MAHdMUcWdVcX1qh5DUsyq3amUTMXP4qalALxsylIJaO2O7QQDs4zon8Mo_/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
   REQUIRE_FARMER_ROWS: true,
   AGE_MIN: 5,
   AGE_MAX: 120,
@@ -636,8 +636,20 @@ async function submitToAppsScript(payload) {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(payload),
   });
-  /* The Apps Script backend always returns JSON */
-  return response.json();
+  const responseText = await response.text();
+  let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch (error) {
+    if (responseText.indexOf("ServiceLogin") !== -1 || responseText.indexOf("Sign in") !== -1) {
+      throw new Error("The Apps Script endpoint requires Google sign-in. Redeploy it with Anyone access.");
+    }
+    throw new Error("The Apps Script endpoint returned an invalid response.");
+  }
+  if (!response.ok) {
+    throw new Error((result && result.error) || "The Apps Script request failed (HTTP " + response.status + ").");
+  }
+  return result;
 }
 
 /* ---------------------------------------------------------
