@@ -16,7 +16,7 @@
       fully filled farmer row before submitting.
    --------------------------------------------------------- */
 const CONFIG = {
-  APPS_SCRIPT_URL: "https://script.google.com/a/macros/acadesmw.com/s/AKfycbyIjfsNzGYaefpV2G-kRcesyHF005FX_xapdejx9o200v1kvXglP4MyAcKiLR5oSW4H/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbxM4eZSWZlTHj3cBWanLJnyyiXE26INY9VGALJ7wXcc1-1BD3BO6AnFFsn93YX0PRCq/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
   REQUIRE_FARMER_ROWS: true,
   AGE_MIN: 5,
   AGE_MAX: 120,
@@ -445,9 +445,7 @@ function buildPayload() {
     }))
     .filter((f) => f.name || f.age !== null || f.gender || f.district || f.ta || f.groupName || f.satisfied || f.followUp || f.comments);
 
-  /* Reuse the saved Submission ID on follow-up submits */
-  const session = loadSession();
-  return { cbv, summary, farmers, submissionId: (session && session.submissionId) || "" };
+  return { cbv, summary, farmers };
 }
 
 /* ---------------------------------------------------------
@@ -505,7 +503,7 @@ function buildReportPdf(report) {
 
   doc.setFontSize(9);
   doc.setTextColor(darkGrey[0], darkGrey[1], darkGrey[2]);
-  doc.text(`Submission ID: ${report.submissionId || "N/A"}`, margin, y);
+  doc.text(`CBV: ${cbv.name || "N/A"}`, margin, y);
   y += 5;
   doc.text(`Submitted: ${formatDateTime(report.submittedAt)}`, margin, y);
   y += 10;
@@ -610,8 +608,10 @@ function downloadReportPdf() {
       throw new Error("PDF library not loaded");
     }
     const doc = buildReportPdf(lastReport);
-    const safeId = String(lastReport.submissionId || "report").replace(/[^a-zA-Z0-9_-]/g, "");
-    doc.save(`Farmers_Report_${safeId}.pdf`);
+    const rawName = String((lastReport.cbv && lastReport.cbv.name) || "report");
+    const safeName = rawName.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "report";
+    const safeStamp = String(lastReport.submittedAt || "").slice(0, 10).replace(/-/g, "");
+    doc.save(`Farmers_Report_${safeName}${safeStamp ? "_" + safeStamp : ""}.pdf`);
   } catch (err) {
     console.error("PDF generation failed:", err);
     showBanner("error", `Could not generate the PDF. Please check your internet connection. (${err.message})`);
@@ -636,8 +636,20 @@ async function submitToAppsScript(payload) {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(payload),
   });
-  /* The Apps Script backend always returns JSON */
-  return response.json();
+  const responseText = await response.text();
+  let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch (error) {
+    if (responseText.indexOf("ServiceLogin") !== -1 || responseText.indexOf("Sign in") !== -1) {
+      throw new Error("The Apps Script endpoint requires Google sign-in. Redeploy it with Anyone access.");
+    }
+    throw new Error("The Apps Script endpoint returned an invalid response.");
+  }
+  if (!response.ok) {
+    throw new Error((result && result.error) || "The Apps Script request failed (HTTP " + response.status + ").");
+  }
+  return result;
 }
 
 /* ---------------------------------------------------------
@@ -673,38 +685,34 @@ async function handleSubmit(event) {
 
     if (result && result.success) {
       const existing = loadSession();
-      const submissionId = result.submissionId || (existing && existing.submissionId) || "OK";
       const submittedAt = new Date().toISOString();
+      const appended = result.appended || payload.farmers.length;
+      const total = typeof result.totalFarmers === "number" ? result.totalFarmers : appended;
 
-      if (existing && existing.submissionId) {
-        saveSession({
-          submissionId,
-          submittedAt,
-          cbv: payload.cbv,
-          summary: payload.summary,
-        });
-        showBanner("success", `Added ${result.appended || payload.farmers.length} farmer(s) to report ${submissionId}. The CBV details stay locked for the next batch.`);
-      } else {
-        saveSession({
-          submissionId,
-          submittedAt,
-          cbv: payload.cbv,
-          summary: payload.summary,
-        });
-        showBanner("success", `Report submitted successfully! Reference ID: ${submissionId}`);
-      }
+      saveSession({
+        active: true,
+        submittedAt,
+        cbv: payload.cbv,
+        summary: payload.summary,
+      });
+
+      showBanner(
+        "success",
+        existing && existing.active
+          ? `Added ${appended} farmer(s). ${payload.cbv.name} now has ${total} farmer(s) on record.`
+          : `Report submitted successfully! ${appended} farmer(s) recorded. ${payload.cbv.name} now has ${total} farmer(s) on record.`
+      );
 
       /* Offer the PDF download right below the success message */
       showDownloadSection({
         cbv: payload.cbv,
         summary: payload.summary,
         farmers: payload.farmers,
-        submissionId,
         submittedAt,
       });
 
       const saved = loadSession();
-      if (saved && saved.submissionId) {
+      if (saved && saved.active) {
         applySession(saved);
       } else {
         hardResetForm();
@@ -725,6 +733,8 @@ async function handleSubmit(event) {
 
 /* ---------------------------------------------------------
    Session persistence
+   The sheet recognises a returning volunteer by name, so the session only
+   needs to remember who is mid-report; there is no report ID to carry.
    --------------------------------------------------------- */
 const SESSION_KEY = "farmers_report_session";
 
@@ -739,7 +749,12 @@ function saveSession(data) {
 function loadSession() {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.active) return parsed;
+    /* Drop anything written by an older build that used a different shape */
+    localStorage.removeItem(SESSION_KEY);
+    return null;
   } catch (e) {
     return null;
   }
@@ -766,9 +781,9 @@ function lockCbvFields(lock) {
 }
 
 /*
- * Restore a saved session: CBV details are pre-filled and locked,
- * the summary is kept, and the farmer table is cleared so the CBV
- * can submit another batch of farmers under the same report.
+ * Restore an active session: the CBV details are pre-filled and locked, the
+ * summary is kept, and the farmer table is cleared so the volunteer can submit
+ * another batch. The sheet recognises them by name, so no report ID is needed.
  */
 function applySession(session) {
   const cbv = session.cbv || {};
@@ -796,16 +811,21 @@ function applySession(session) {
   elResetBtn.textContent = "Start New Report (Yambani Ripoti Latsopano)";
 }
 
-/* Hard-reset the form to a fully blank, unlocked state (no session) */
+/*
+ * Hard-reset the form to a fully blank, unlocked state (no session).
+ * The CBV fields must be unlocked *before* form.reset(): the browser skips
+ * disabled controls when resetting, so resetting first would leave the
+ * previous volunteer's details in place and silently file the next batch
+ * of farmers under them.
+ */
 function hardResetForm() {
+  lockCbvFields(false);
   elForm.reset();
   elTableBody.innerHTML = "";
   addFarmerRow();
   elForm.querySelectorAll(".invalid").forEach((el) => el.classList.remove("invalid"));
   elForm.querySelectorAll(".field-error").forEach((el) => (el.textContent = ""));
   elTableError.textContent = "";
-
-  lockCbvFields(false);
 
   elResetBtn.textContent = "Reset Form (Bwezerani Fomu)";
 }
@@ -863,7 +883,7 @@ function init() {
 
   /* Restore an active session (CBV locked, ready for more farmers) */
   const saved = loadSession();
-  if (saved && saved.submissionId) {
+  if (saved && saved.active) {
     applySession(saved);
   }
 }
