@@ -65,7 +65,7 @@ function doPost(e) {
     const payload = JSON.parse(contents);
     validatePayload_(payload);
 
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const spreadsheet = openSpreadsheet_();
     const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
     const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
     const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS);
@@ -149,7 +149,7 @@ function doGet(e) {
 }
 
 function handleHealth_() {
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = openSpreadsheet_();
   const sheets = {};
   const tabs = spreadsheet.getSheets().map(function (sheet) {
     return sheet.getName();
@@ -182,6 +182,8 @@ function handleHealth_() {
 
   return respond(true, "Health check complete.", {
     spreadsheetId: SPREADSHEET_ID,
+    spreadsheetTitle: spreadsheet.getName(),
+    spreadsheetUrl: spreadsheet.getUrl(),
     tabs: tabs,
     sheets: sheets,
   });
@@ -194,7 +196,7 @@ function handleHealth_() {
  * This only lists them; it never deletes anything.
  */
 function handleOrphans_() {
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = openSpreadsheet_();
   const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
   const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
   const submissionsSchema = buildSchema_(submissionsSheet, SUBMISSION_FIELDS);
@@ -257,7 +259,7 @@ function handleCount_(params) {
   const name = text_(params.cbv);
   if (!name) return respond(false, "Pass the CBV name, for example ?action=count&cbv=Memory%20Mbewe");
 
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = openSpreadsheet_();
   const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
   const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
   const submissionsSchema = buildSchema_(submissionsSheet, SUBMISSION_FIELDS);
@@ -291,7 +293,7 @@ function handleCount_(params) {
  * from the CBV's earliest report rather than reconstructed.
  */
 function handleBackfillDates_() {
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = openSpreadsheet_();
   const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
   const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
   const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS);
@@ -353,7 +355,7 @@ function handleBackfillDates_() {
  * CBV from the farmer rows that actually exist in the Farmers tab.
  */
 function handleRepair_() {
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = openSpreadsheet_();
   const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
   const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
   const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS);
@@ -439,8 +441,44 @@ function validatePayload_(payload) {
    --------------------------------------------------------- */
 function getRequiredSheet_(spreadsheet, name) {
   const sheet = spreadsheet.getSheetByName(name);
-  if (!sheet) throw new Error("Required sheet tab not found: " + name);
+  if (!sheet) {
+    const present = spreadsheet.getSheets().map(function (tab) {
+      return "'" + tab.getName() + "'";
+    }).join(", ");
+    throw new Error(
+      "The '" + name + "' tab is missing from spreadsheet " + SPREADSHEET_ID +
+      ". Tabs found: " + present + ". Nothing was changed."
+    );
+  }
   return sheet;
+}
+
+/*
+ * Opening the workbook is the step most likely to fail after the project sheet
+ * is replaced, because a replacement has a brand new ID. Turn that into a
+ * message that says what to change instead of a bare permission error.
+ */
+function openSpreadsheet_() {
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
+  } catch (error) {
+    throw new Error(
+      "Cannot open spreadsheet " + SPREADSHEET_ID + " (" + error.message + "). " +
+      "If the project sheet was replaced, the new sheet has a different ID: open it, copy the text " +
+      "between /d/ and /edit in its URL, put it in SPREADSHEET_ID at the top of Code.gs, and create " +
+      "a new deployment. Nothing was changed."
+    );
+  }
+}
+
+/* Compact description of the first few rows, for error messages */
+function previewRow_(sheet) {
+  const cells = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
+    .map(text_)
+    .filter(function (value) {
+      return value !== "";
+    });
+  return cells.length ? cells.slice(0, 5).join(" | ") : "(row 1 is empty)";
 }
 
 function getLastContentColumn_(sheet) {
@@ -486,7 +524,12 @@ function ensureSchema_(sheet, requiredFields) {
     });
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   } else if (!hasHeaders) {
-    throw new Error("The " + sheet.getName() + " header row is invalid. Restore its column headings before submitting.");
+    throw new Error(
+      "The '" + sheet.getName() + "' sheet has no recognisable headings in row 1 (found: " +
+      previewRow_(sheet) + "). The column headings must sit in row 1. " +
+      "If your headings are on another row, delete the rows above them so the headings are in row 1, " +
+      "then submit again. Nothing was changed."
+    );
   } else {
     const map = mapHeaders_(sheet, requiredFields);
     const missing = requiredFields.filter(function (field) {
