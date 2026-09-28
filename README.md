@@ -12,53 +12,82 @@ Google Sheet through a Google Apps Script Web App. Users never touch the Sheet.
 | `style.css` | Professional styling (green/agricultural theme) |
 | `script.js` | Farmer table logic, client-side validation, submission, session handling |
 | `Code.gs` | Google Apps Script backend that writes to the Sheet |
-| `CBV-Farmers-Database  (1).xlsx` | Reference workbook schema for the Sheet tabs |
+| `CBV-Farmers-Database  (2).xlsx` | Reference workbook schema for the Sheet tabs |
 | `appsscript.json` | Apps Script manifest (timezone, runtime, web app) |
 | `ACADES-logo.png` | Logo shown in the page header |
 
 ## How the data is stored
 
 The backend is connected to the Google Sheet configured as `SPREADSHEET_ID` in
-`Code.gs`. New records are written to these tabs:
+`Code.gs`. There is **no submission ID**. A volunteer is recognised by their
+**name**, so every farmer they record is linked to the one Submissions row that
+belongs to them.
 
-1. **Submissions** - one row per report with `Timestamp`, CBV details, summary,
-   `Submission ID`, and a batch total for `Number of Farmers`.
-2. **Farmers** - one row per farmer with the reference workbook's A:K fields:
-   `Submission Date`, `CBV Name`, farmer details, satisfaction, follow-up, and
-   `Comments (Zowonjezera)`. The backend does not add or write `Submission ID` or
-   `Row #` to this tab.
+### Submissions - one row per CBV, updated in place
 
-The adapter matches the existing header names and appends the two missing
-backend columns (`Submission ID` and `Number of Farmers`) to `Submissions` after
-its existing A:J fields. It ignores formatted blank ranges when finding the next
-row. It does not edit, recalculate, or write to **Monthly CBV Summary**; that
-tab remains manually maintained. The hidden `_CBV_Highlight_List` tab is also
-left untouched.
+| Column | On the first submit | On later submits |
+|--------|---------------------|------------------|
+| `Timestamp` | now | kept (first time seen) |
+| `Submission Date` | now | advanced to the current report |
+| `Name (Dzina Lanu)` | from the form | refreshed |
+| `Age (Zaka zanu)` | from the form | refreshed |
+| `Gender (Mamuna kapena Mkazi)` | from the form | refreshed |
+| `District (Boma)` | from the form | refreshed |
+| `T/A` | from the form | refreshed |
+| `Group (Dzina la Gulu)` | from the form | refreshed |
+| `Farmers Reached (Mwafikira Alimi angati)` | from the form | refreshed |
+| `Common Questions (Mafunso)` | from the form | refreshed |
+| `Number of Farmers` | count of linked farmer rows | recounted |
 
-`Submission ID` is retained in `Submissions` and in the browser session. CBV
-details are used to find the existing submission, but the backend does not
-scan or verify existing farmer rows before appending a new batch. The reported
-`Number of Farmers` is only the running total of batches submitted to that
-submission. `Submission Date` and `Comments (Zowonjezera)` are written in the
-Farmers tab. Optional `Common Questions` and farmer `Group Name` cells remain
-empty when no optional text is supplied.
+The row is matched on `Name (Dzina Lanu)` plus `District (Boma)`, compared
+case-insensitively and ignoring punctuation, spacing and Unicode decoration, so
+`MACHILIKA ORTON`, `Machilika orton` and the superscript-caps spelling all resolve
+to the same volunteer. The **most recent** matching row is the one updated.
 
-### CBV sessions (adding farmers over time)
+A legacy `Submission ID` column may still exist further right in this tab. The
+backend never writes it, and existing values are never blanked.
 
-- After the first submit, the browser keeps the **CBV details and the
-  `Submission ID`** in `localStorage` (a "session").
-- On their next visit, the CBV section is pre-filled and **locked**, the farmer
-  table is cleared, and the form is ready for a new batch of farmers.
-- Submitting again **appends the new farmer rows to the same report** in the
-  **Farmers** sheet and updates that submission's summary and running batch
-  total. No duplicate submission row is created.
-- Use the **Start New Report** button to end the session and begin a fresh
-  submission (this clears the browser storage for that CBV).
+### Farmers - one row per farmer, all columns written
 
-> If a browser does not have the session, the backend tries to match the
-> submission by CBV details before creating a new one.
+`Submission Date`, `CBV Name`, `Farmer Name (Dzina)`, `Age (Zaka)`,
+`Gender (Mamuna/Mkazi)`, `District (Boma)`, `T/A`, `Group Name`,
+`Satisfied? (Eya/Ayi)`, `Follow Up Visit (Eya/Ayi)`, `Comments (Zowonjezera)`.
 
----
+`CBV Name` is the foreign key: `Number of Farmers` in the Submissions tab is the
+number of Farmers rows whose `CBV Name` matches that volunteer, however many
+batches they submitted over time. `Submission Date` is always written.
+
+Note that `District (Boma)` and `T/A` on a farmer row are **that farmer's** own
+location, which is often not the volunteer's. Do not group or total by those
+columns.
+
+The backend does not write to **Monthly CBV Summary** (maintained manually by the
+project team) and does not touch the hidden `_CBV_Highlight_List` tab.
+
+### Write order and safety
+
+Farmer rows are written to the Farmers tab **first**, then read back at exactly
+those row positions to confirm they landed. Only then is the Submissions row
+written. If the farmer write is short or fails, those rows are cleared and the
+request is rejected - the Submissions tab never records farmers that are not in
+the sheet. Nothing is deleted on a successful write.
+
+## Maintenance actions
+
+Append an action to the web app URL and open it in a browser:
+
+| URL | What it does |
+|-----|--------------|
+| `?action=health` | Reports the tabs found, their headers, the column each field resolved to, the last data row, and any field that failed to map. Read-only. |
+| `?action=count&cbv=Name` | Counts the Farmers rows linked to one CBV and shows the total currently recorded in Submissions. Add `&district=X` to scope the lookup. |
+| `?action=backfillDates` | Fills blank `Submission Date` cells in the Farmers tab using the **earliest** Submission Date recorded for that CBV. Only fills empty cells, so it is safe to re-run. |
+| `?action=repair` | Recomputes `Number of Farmers` on the most recent Submissions row of every CBV from the rows that actually exist. Safe to re-run. |
+
+> `backfillDates` **infers** the value. The original Google Form never captured a
+> per-farmer timestamp, so for rows written before this project existed the date
+> is taken from the volunteer's earliest report rather than reconstructed. Rows
+> whose CBV Name matches no Submissions row are left blank and listed in the
+> response as `unmatchedByCbv`.
 
 ## Deployment Instructions (step by step)
 
@@ -112,11 +141,13 @@ Open `index.html` in a browser and:
 - Confirm all 28 districts appear in both dropdowns.
 - Submit with empty fields to check the validation messages.
 - Enter a full farmer row, submit, then reload - the CBV section should be
-  locked with the same Report ID and a fresh empty farmer table.
-- Submit again to confirm the new farmers are appended to the same report.
-- In the Google Sheet, verify that `Submissions` has `Submission ID` and
-  `Number of Farmers` after the reference A:J columns, and that `Farmers` has
-  the reference A:K columns with `Submission Date` and comments populated.
-- Confirm that `Farmers` does not gain `Submission ID` or `Row #` columns.
+  locked with the same details and a fresh empty farmer table.
+- Submit again to confirm the new farmers are appended and the reported total
+  increases, with no second Submissions row created.
+- Open `.../exec?action=health` and confirm `unmappedFields` is empty for both
+  tabs.
+- Open `.../exec?action=count&cbv=<name>` and confirm the farmer row count
+  matches what is visible in the Farmers tab and in `Number of Farmers`.
+- Use **Start New Report** and confirm the CBV fields are actually blank
+  afterwards.
 - Confirm that submitting does not change **Monthly CBV Summary**.
-- Use **Start New Report** to begin a fresh submission.
