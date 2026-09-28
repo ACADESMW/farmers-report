@@ -16,7 +16,7 @@
       fully filled farmer row before submitting.
    --------------------------------------------------------- */
 const CONFIG = {
-  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbwFxQKkyTevs7KCK39fIqhmOAbnj0YdyE3D2HcK4fmYXR9zt84gkTPH9vezlZgYzYyO/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbxM4eZSWZlTHj3cBWanLJnyyiXE26INY9VGALJ7wXcc1-1BD3BO6AnFFsn93YX0PRCq/exec", // e.g. "https://script.google.com/macros/s/XXXX/exec"
   REQUIRE_FARMER_ROWS: true,
   AGE_MIN: 5,
   AGE_MAX: 120,

@@ -1,5 +1,12 @@
 const SPREADSHEET_ID = "1YNXMaR2qe0TXS3MINdD3ikkMS8r-GHcoFpmWgyZ4b34";
 
+/*
+ * Bump this on every change and redeploy. It is echoed in every JSON response
+ * so you can tell, from ?action=health, which build the web app is actually
+ * serving. A stale deployment is the one failure this cannot self-heal.
+ */
+const APP_VERSION = "2026-09-28-r3";
+
 const SUBMISSIONS_SHEET = "Submissions";
 const FARMERS_SHEET = "Farmers";
 
@@ -38,7 +45,7 @@ const DAY_MS = 86400000;
    Responses
    --------------------------------------------------------- */
 function respond(status, message, extra) {
-  const output = { success: status, message: message };
+  const output = { success: status, message: message, appVersion: APP_VERSION };
   if (!status) output.error = message;
   if (extra) {
     for (const key in extra) output[key] = extra[key];
@@ -63,6 +70,14 @@ function doPost(e) {
     const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
     const submissionsSchema = ensureSchema_(submissionsSheet, SUBMISSION_FIELDS);
     const farmersSchema = ensureSchema_(farmersSheet, FARMER_FIELDS);
+
+    /*
+     * Refuse to write if any column could not be located. Writing with an
+     * unmapped field would append a blank row that looks like real data and
+     * silently discard the farmers, which is far worse than a loud failure.
+     */
+    assertSchemaComplete_(farmersSchema, FARMER_FIELDS, FARMERS_SHEET);
+    assertSchemaComplete_(submissionsSchema, SUBMISSION_FIELDS, SUBMISSIONS_SHEET);
 
     const cbv = payload.cbv;
     const summary = payload.summary;
@@ -115,7 +130,7 @@ function doGet(e) {
       .createHtmlOutput(
         "<h1>Farmers Report API</h1>" +
         "<p>This web app accepts farmer report submissions.</p>" +
-        "<p>Maintenance actions: <code>?action=health</code>, <code>?action=count&amp;cbv=Name</code>, " +
+        "<p>Maintenance actions: <code>?action=health</code>, <code>?action=orphans</code>, <code>?action=count&amp;cbv=Name</code>, " +
         "<code>?action=backfillDates</code>, <code>?action=repair</code>.</p>"
       )
       .setTitle("Farmers Report API");
@@ -123,6 +138,7 @@ function doGet(e) {
 
   try {
     if (action === "health") return handleHealth_();
+    if (action === "orphans") return handleOrphans_();
     if (action === "count") return handleCount_(params);
     if (action === "backfillDates") return handleBackfillDates_();
     if (action === "repair") return handleRepair_();
@@ -168,6 +184,72 @@ function handleHealth_() {
     spreadsheetId: SPREADSHEET_ID,
     tabs: tabs,
     sheets: sheets,
+  });
+}
+
+/*
+ * Read-only. Finds the Submissions rows that the old, broken build left behind:
+ * it wrote the Submissions row first, then wiped the farmers when the check
+ * failed. Those rows are orphans - a volunteer recorded with no farmers.
+ * This only lists them; it never deletes anything.
+ */
+function handleOrphans_() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const submissionsSheet = getRequiredSheet_(spreadsheet, SUBMISSIONS_SHEET);
+  const farmersSheet = getRequiredSheet_(spreadsheet, FARMERS_SHEET);
+  const submissionsSchema = buildSchema_(submissionsSheet, SUBMISSION_FIELDS);
+  const farmersSchema = buildSchema_(farmersSheet, FARMER_FIELDS);
+
+  const farmerCounts = {};
+  getRows_(farmersSheet, farmersSchema).forEach(function (row) {
+    const key = normalizeName_(valueAt_(row.values, farmersSchema.map, "cbvName"));
+    if (!key) return;
+    farmerCounts[key] = (farmerCounts[key] || 0) + 1;
+  });
+
+  const orphans = [];
+  const names = {};
+  const displayName = {};
+  const rowsPerCbv = {};
+  getRows_(submissionsSheet, submissionsSchema).forEach(function (row) {
+    const name = text_(valueAt_(row.values, submissionsSchema.map, "name"));
+    const key = normalizeName_(name);
+    if (!key) return;
+    names[key] = true;
+    displayName[key] = name;
+    rowsPerCbv[key] = (rowsPerCbv[key] || 0) + 1;
+    if ((farmerCounts[key] || 0) > 0) return;
+    const recorded = Number(valueAt_(row.values, submissionsSchema.map, "numberOfFarmers"));
+    orphans.push({
+      row: row.row,
+      name: name,
+      district: text_(valueAt_(row.values, submissionsSchema.map, "district")),
+      submissionDate: formatStamp_(toDateValue_(valueAt_(row.values, submissionsSchema.map, "submissionDate"))),
+      recordedNumberOfFarmers: Number.isFinite(recorded) ? recorded : null,
+    });
+  });
+
+  /* Surplus Submissions rows for CBVs that do have farmers (legacy duplicates) */
+  let extraRows = 0;
+  const duplicated = [];
+  Object.keys(rowsPerCbv).forEach(function (key) {
+    if (rowsPerCbv[key] < 2) return;
+    extraRows += rowsPerCbv[key] - 1;
+    duplicated.push({
+      name: displayName[key],
+      submissionRows: rowsPerCbv[key],
+      farmerRows: farmerCounts[key] || 0,
+    });
+  });
+
+  return respond(true, "Orphan scan complete. Nothing was changed.", {
+    submissionRows: getLastContentRow_(submissionsSheet, submissionsSchema.width) - 1,
+    distinctCbv: Object.keys(names).length,
+    orphanRows: orphans.length,
+    orphans: orphans,
+    duplicateCbv: duplicated.length,
+    surplusSubmissionRows: extraRows,
+    duplicated: duplicated,
   });
 }
 
@@ -420,6 +502,27 @@ function ensureSchema_(sheet, requiredFields) {
   }
 
   return buildSchema_(sheet, requiredFields);
+}
+
+/*
+ * Hard stop before any write. If a heading still cannot be found after
+ * ensureSchema_ has had a chance to add it, the sheet has been restructured by
+ * hand (or is protected). Appending rows now would produce blank rows and
+ * silently lose the farmers, so stop and say exactly what is wrong.
+ */
+function assertSchemaComplete_(schema, fields, sheetName) {
+  const missing = fields.filter(function (field) {
+    return schema.map[field.key] < 0;
+  });
+  if (!missing.length) return;
+
+  throw new Error(
+    "Stopped before writing: the '" + sheetName + "' sheet is missing these column headings - " +
+    missing.map(function (field) {
+      return "'" + field.header + "'";
+    }).join(", ") +
+    ". Nothing was changed. Add the headings in row 1 of that tab (or restore them) and submit again."
+  );
 }
 
 function buildSchema_(sheet, fields) {

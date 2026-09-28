@@ -78,7 +78,8 @@ Append an action to the web app URL and open it in a browser:
 
 | URL | What it does |
 |-----|--------------|
-| `?action=health` | Reports the tabs found, their headers, the column each field resolved to, the last data row, and any field that failed to map. Read-only. |
+| `?action=health` | Reports the build version, the tabs found, their headers, the column each field resolved to, the last data row, and any field that failed to map. Read-only. |
+| `?action=orphans` | Read-only. Lists Submissions rows for volunteers who have **no** farmer rows at all, and counts the surplus duplicate rows. These are the casualties of the old build, which wrote the Submissions row first and then wiped the farmers. Changes nothing. |
 | `?action=count&cbv=Name` | Counts the Farmers rows linked to one CBV and shows the total currently recorded in Submissions. Add `&district=X` to scope the lookup. |
 | `?action=backfillDates` | Fills blank `Submission Date` cells in the Farmers tab using the **earliest** Submission Date recorded for that CBV. Only fills empty cells, so it is safe to re-run. |
 | `?action=repair` | Recomputes `Number of Farmers` on the most recent Submissions row of every CBV from the rows that actually exist. Safe to re-run. |
@@ -125,7 +126,25 @@ Append an action to the web app URL and open it in a browser:
    **New deployment** again (or edit the existing deployment) so the web app
    uses the new code. The URL may change - if it does, update `script.js`.
 
-### Part D - Host the form on GitHub Pages
+### Part D - Prove the new code is the code that is live
+
+A deployment that was not updated is the single failure this project cannot
+detect from inside itself, so check it explicitly:
+
+1. Open `.../exec?action=health` in a browser.
+2. If you get a **web page** instead of JSON, the app is running an old build.
+3. If you get JSON, look at `appVersion`. It must match `APP_VERSION` at the top
+   of `Code.gs`.
+4. Check `sheets.Farmers.unmappedFields` and `sheets.Submissions.unmappedFields`
+   - both must be `[]`. If a field is listed, the app will refuse to write and
+   say which heading is missing.
+5. `sheets.Farmers.nextDataRow` is the row the next farmer will land on. After a
+   test submission it should have increased by the number of farmers entered.
+
+Then `.../exec?action=orphans` to list the Submissions rows the old build left
+without farmers. It only reports; it never deletes.
+
+### Part E - Host the form on GitHub Pages
 
 1. Push this folder to a GitHub repository.
 2. In the repo, go to **Settings > Pages**, choose **Deploy from a branch**,
@@ -145,9 +164,13 @@ Open `index.html` in a browser and:
 - Submit again to confirm the new farmers are appended and the reported total
   increases, with no second Submissions row created.
 - Open `.../exec?action=health` and confirm `unmappedFields` is empty for both
-  tabs.
+  tabs and that `appVersion` matches the top of `Code.gs`.
+- Open `.../exec?action=orphans` and note how many Submissions rows have no
+  farmers at all.
 - Open `.../exec?action=count&cbv=<name>` and confirm the farmer row count
   matches what is visible in the Farmers tab and in `Number of Farmers`.
+- Check `sheets.Farmers.nextDataRow` before and after a test submission; it
+  should rise by exactly the number of farmers entered.
 - Use **Start New Report** and confirm the CBV fields are actually blank
   afterwards.
 - Confirm that submitting does not change **Monthly CBV Summary**.
