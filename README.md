@@ -90,6 +90,23 @@ Append an action to the web app URL and open it in a browser:
 > whose CBV Name matches no Submissions row are left blank and listed in the
 > response as `unmatchedByCbv`.
 
+### Locating the columns
+
+The backend does not assume the column headings are in row 1. On each tab it
+scans the first ten rows for the row that best matches the expected headings and
+uses that. A sheet that has gained a title row, or that was rebuilt by hand, so
+keeps working:
+
+- Headings are found wherever they are in the first ten rows.
+- A heading that is missing is added to the same row as the others.
+- A tab with no recognisable heading row at all is refused, and the error quotes
+  the first five rows so you can see what it found.
+- A field that still cannot be located stops the write before anything changes,
+  naming the exact heading.
+
+`?action=health` reports `headerRow` for each tab, so you can see which row the
+app decided was the heading row.
+
 ## Deployment Instructions (step by step)
 
 ### Part A - Google Sheet

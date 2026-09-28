@@ -5,7 +5,7 @@ const SPREADSHEET_ID = "1YNXMaR2qe0TXS3MINdD3ikkMS8r-GHcoFpmWgyZ4b34";
  * so you can tell, from ?action=health, which build the web app is actually
  * serving. A stale deployment is the one failure this cannot self-heal.
  */
-const APP_VERSION = "2026-09-28-r3";
+const APP_VERSION = "2026-09-28-r4";
 
 const SUBMISSIONS_SHEET = "Submissions";
 const FARMERS_SHEET = "Farmers";
@@ -165,6 +165,7 @@ function handleHealth_() {
     const schema = buildSchema_(sheet, fields);
     sheets[tabName] = {
       found: true,
+      headerRow: findHeaderRow_(sheet, fields) || 0,
       lastContentColumn: schema.width,
       lastDataRow: getLastContentRow_(sheet, schema.width),
       nextDataRow: nextDataRow_(sheet, schema.width),
@@ -245,7 +246,7 @@ function handleOrphans_() {
   });
 
   return respond(true, "Orphan scan complete. Nothing was changed.", {
-    submissionRows: getLastContentRow_(submissionsSheet, submissionsSchema.width) - 1,
+    submissionRows: getLastContentRow_(submissionsSheet, submissionsSchema.width) - (submissionsSchema.headerRow || 1),
     distinctCbv: Object.keys(names).length,
     orphanRows: orphans.length,
     orphans: orphans,
@@ -339,7 +340,7 @@ function handleBackfillDates_() {
   const patched = patchSingleColumn_(farmersSheet, dateColumn + 1, updates, false);
 
   return respond(true, "Backfill complete.", {
-    farmerRows: getLastContentRow_(farmersSheet, farmersSchema.width) - 1,
+    farmerRows: getLastContentRow_(farmersSheet, farmersSchema.width) - (farmersSchema.headerRow || 1),
     alreadyHadDate: alreadyFilled,
     emptySpacerRowsSkipped: emptySpacerRows,
     filled: patched,
@@ -472,19 +473,52 @@ function openSpreadsheet_() {
 }
 
 /* Compact description of the first few rows, for error messages */
-function previewRow_(sheet) {
-  const cells = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
-    .map(text_)
-    .filter(function (value) {
-      return value !== "";
-    });
-  return cells.length ? cells.slice(0, 5).join(" | ") : "(row 1 is empty)";
+function previewRows_(sheet) {
+  const rows = Math.min(sheet.getLastRow(), 5);
+  if (rows < 1) return "(the sheet is empty)";
+  return sheet.getRange(1, 1, rows, Math.max(sheet.getLastColumn(), 1)).getValues()
+    .map(function (row, index) {
+      const cells = row.map(text_).filter(function (value) {
+        return value !== "";
+      });
+      return "row " + (index + 1) + ": " + (cells.length ? cells.slice(0, 4).join(" | ") : "(empty)");
+    })
+    .join("   ");
 }
 
-function getLastContentColumn_(sheet) {
+/*
+ * Finds the row that holds the column headings, scanning the top of the sheet
+ * rather than insisting on row 1. A sheet that gained a title row, or that was
+ * rebuilt by hand, then keeps working instead of refusing every submission.
+ * Returns 0 when no row looks like a heading row.
+ */
+function findHeaderRow_(sheet, fields) {
+  const scan = Math.min(sheet.getLastRow(), 10);
+  if (scan < 1) return 0;
+
+  const rows = sheet.getRange(1, 1, scan, Math.max(sheet.getLastColumn(), 1)).getValues();
+  let bestRow = 0;
+  let bestScore = 0;
+
+  rows.forEach(function (row, index) {
+    const score = row.filter(function (value) {
+      return isKnownHeader_(value, fields);
+    }).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = index + 1;
+    }
+  });
+
+  /* One lucky match is not a heading row; three is a convincing one */
+  return bestScore >= 3 ? bestRow : 0;
+}
+
+function getLastContentColumn_(sheet, rowNumber) {
+  const headerRow = rowNumber || 1;
   const lastColumn = sheet.getLastColumn();
   if (lastColumn < 1) return 0;
-  const values = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const values = sheet.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
   for (let i = values.length - 1; i >= 0; i--) {
     if (text_(values[i]) !== "") return i + 1;
   }
@@ -509,42 +543,48 @@ function nextDataRow_(sheet, width) {
 }
 
 function ensureSchema_(sheet, requiredFields) {
-  const width = Math.max(getLastContentColumn_(sheet), 1);
-  const firstRow = sheet.getRange(1, 1, 1, width).getValues()[0];
-  const hasValues = firstRow.some(function (value) {
-    return text_(value) !== "";
-  });
-  const hasHeaders = firstRow.some(function (value) {
-    return isKnownHeader_(value, requiredFields);
-  });
+  const headerRow = findHeaderRow_(sheet, requiredFields);
 
-  if (!hasValues) {
-    const headers = requiredFields.map(function (field) {
-      return field.header;
-    });
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  } else if (!hasHeaders) {
-    throw new Error(
-      "The '" + sheet.getName() + "' sheet has no recognisable headings in row 1 (found: " +
-      previewRow_(sheet) + "). The column headings must sit in row 1. " +
-      "If your headings are on another row, delete the rows above them so the headings are in row 1, " +
-      "then submit again. Nothing was changed."
-    );
-  } else {
+  if (headerRow) {
+    /* Top up any heading that is absent, on whichever row the headings live. */
     const map = mapHeaders_(sheet, requiredFields);
     const missing = requiredFields.filter(function (field) {
       return map[field.key] < 0;
     });
     if (missing.length) {
-      const startColumn = getLastContentColumn_(sheet) + 1;
+      const startColumn = getLastContentColumn_(sheet, headerRow) + 1;
       const headers = missing.map(function (field) {
         return field.header;
       });
-      sheet.getRange(1, startColumn, 1, headers.length).setValues([headers]);
+      sheet.getRange(headerRow, startColumn, 1, headers.length).setValues([headers]);
     }
+    return buildSchema_(sheet, requiredFields);
   }
 
-  return buildSchema_(sheet, requiredFields);
+  /* No heading row anywhere: only safe to create one if the sheet is empty. */
+  const hasContent = sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 1),
+    Math.max(sheet.getLastColumn(), 1)).getValues().some(function (row) {
+    return row.some(function (value) {
+      return text_(value) !== "";
+    });
+  });
+
+  if (!hasContent) {
+    const headers = requiredFields.map(function (field) {
+      return field.header;
+    });
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return buildSchema_(sheet, requiredFields);
+  }
+
+  throw new Error(
+    "The '" + sheet.getName() + "' sheet has no recognisable column headings near the top " +
+    "(searched the first 10 rows). Found -> " + previewRows_(sheet) + ". " +
+    "The headings must include at least three of: " +
+    requiredFields.slice(0, 4).map(function (field) {
+      return "'" + field.header + "'";
+    }).join(", ") + ", and so on. Nothing was changed."
+  );
 }
 
 /*
@@ -569,8 +609,9 @@ function assertSchemaComplete_(schema, fields, sheetName) {
 }
 
 function buildSchema_(sheet, fields) {
-  const lastColumn = Math.max(getLastContentColumn_(sheet), 1);
-  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const headerRow = findHeaderRow_(sheet, fields) || 1;
+  const lastColumn = Math.max(getLastContentColumn_(sheet, headerRow), 1);
+  const headers = sheet.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
   const map = {};
   const used = {};
 
@@ -587,7 +628,7 @@ function buildSchema_(sheet, fields) {
     }
   });
 
-  return { map: map, width: lastColumn };
+  return { map: map, width: lastColumn, headerRow: headerRow };
 }
 
 function mapHeaders_(sheet, fields) {
@@ -676,11 +717,14 @@ function formatStamp_(date) {
    Row reading and single column patching
    --------------------------------------------------------- */
 function getRows_(sheet, schema) {
+  const firstDataRow = (schema.headerRow || 1) + 1;
   const lastRow = getLastContentRow_(sheet, schema.width);
-  if (lastRow < 2) return [];
-  return sheet.getRange(2, 1, lastRow - 1, schema.width).getValues().map(function (values, index) {
-    return { row: index + 2, values: values };
-  });
+  if (lastRow < firstDataRow) return [];
+  return sheet.getRange(firstDataRow, 1, lastRow - firstDataRow + 1, schema.width)
+    .getValues()
+    .map(function (values, index) {
+      return { row: index + firstDataRow, values: values };
+    });
 }
 
 /*
